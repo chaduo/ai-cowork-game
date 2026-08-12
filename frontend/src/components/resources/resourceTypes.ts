@@ -1,6 +1,21 @@
+import type { SpecContext } from '../workspace/workspaceTypes'
+
 export type ResourceCandidateType = 'gameplay' | 'ui' | 'visual'
 export type ResourceCandidateStatus = 'pending' | 'saving' | 'saved' | 'ignored'
 export type ResourceRecommendation = 'recommended' | 'worth_saving' | 'adjust_first'
+
+export type ResourceBatchState = 'pending' | 'saving' | 'saved' | 'ignored'
+export type ResourceBatchItem = { candidate: ResourceCandidate; state: ResourceBatchState }
+
+export type ResourceMatchSignals = { section: SpecContext['key']; signals: string[] }
+
+export type RelationshipReuseDefaults = {
+  favorMin: number
+  favorMax: number
+  thresholds: number[]
+  requestReward: number
+  importantEventReward: number
+}
 
 export type ResourceCandidate = {
   id: string
@@ -27,4 +42,6 @@ export type ResourceCandidate = {
     projectSpecificContentRemoved: boolean
     parameterizable: boolean
   }
+  matchSignals?: ResourceMatchSignals
+  reuseDefaults?: RelationshipReuseDefaults
 }

@@ -26,6 +26,33 @@ export type CoworkMessage = {
   action?: 'apply-revision'
 }
 
+export type PlayableSnapshot = {
+  projectTitle: string
+  npcNames: string[]
+  capabilities: string[]
+  previewVariant: 'farm' | 'coffee' | 'generic'
+  relationshipSummary: string
+}
+
+export type PlayableVersionRecord = {
+  version: number
+  name: string
+  summary: string
+  reason: 'initial' | 'change' | 'restore'
+  restoredFrom?: number
+  basedOnDesign: number
+  basedOnSpec: number
+  createdAt: number
+  snapshot: PlayableSnapshot
+}
+
+export type RelationshipDraft = {
+  relationshipGrowth: string
+  favorRules: string
+  relationshipEvents: string
+  requestRewards: string
+}
+
 export type SourceKind = 'confirmed' | 'default' | 'simplified'
 
 export type GameSpecModel = {
