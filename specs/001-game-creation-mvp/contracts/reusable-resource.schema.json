@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-cowork-game.example/schemas/reusable-resource-1.0.json",
+  "title": "AI Cowork Game Reusable Resource",
+  "oneOf": [
+    { "$ref": "#/$defs/template" },
+    { "$ref": "#/$defs/experience" },
+    { "$ref": "#/$defs/asset" }
+  ],
+  "$defs": {
+    "base": {
+      "type": "object",
+      "required": ["id", "resourceType", "status", "createdAt"],
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "resourceType": { "enum": ["template", "experience", "asset"] },
+        "status": { "enum": ["draft", "pending_review", "available", "rejected", "retired", "invalid"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "reviewedAt": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+    "template": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "resourceType", "status", "createdAt", "reviewedAt", "name", "sourceProjectId", "sourceVersionId", "testReportId", "capabilityProfile", "gameSpecSchemaVersion"],
+          "properties": {
+            "id": { "type": "string", "format": "uuid" },
+            "resourceType": { "const": "template" },
+            "status": { "enum": ["available", "retired", "invalid"] },
+            "createdAt": { "type": "string", "format": "date-time" },
+            "reviewedAt": { "type": "string", "format": "date-time" },
+            "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+            "sourceProjectId": { "type": "string", "format": "uuid" },
+            "sourceVersionId": { "type": "string", "format": "uuid" },
+            "testReportId": { "type": "string", "format": "uuid" },
+            "capabilityProfile": { "const": "phaser-survival-v1" },
+            "gameSpecSchemaVersion": { "type": "string", "minLength": 1, "maxLength": 32 }
+          }
+        }
+      ]
+    },
+    "experience": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "resourceType", "status", "createdAt", "sourceRunId", "sourceCandidateId", "sourceVersionId", "testReportId", "kind", "capabilityProfile", "problem", "applicability", "actionSummary", "modifiedFiles"],
+          "properties": {
+            "id": { "type": "string", "format": "uuid" },
+            "resourceType": { "const": "experience" },
+            "status": { "enum": ["draft", "pending_review", "available", "rejected", "retired", "invalid"] },
+            "createdAt": { "type": "string", "format": "date-time" },
+            "reviewedAt": { "type": ["string", "null"], "format": "date-time" },
+            "sourceRunId": { "type": "string", "format": "uuid" },
+            "sourceCandidateId": { "type": "string", "format": "uuid" },
+            "sourceVersionId": { "type": "string", "format": "uuid" },
+            "testReportId": { "type": "string", "format": "uuid" },
+            "kind": { "enum": ["development", "repair"] },
+            "capabilityProfile": { "const": "phaser-survival-v1" },
+            "problem": { "type": "string", "minLength": 1, "maxLength": 4000 },
+            "applicability": { "type": "object" },
+            "actionSummary": { "type": "string", "minLength": 1, "maxLength": 8000 },
+            "modifiedFiles": { "type": "array", "items": { "type": "string", "maxLength": 240 } }
+          }
+        }
+      ]
+    },
+    "asset": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "resourceType", "status", "createdAt", "reviewedAt", "sourceProjectId", "sourceVersionId", "sourceAssetId", "kind", "style", "provenance", "licenseNote"],
+          "properties": {
+            "id": { "type": "string", "format": "uuid" },
+            "resourceType": { "const": "asset" },
+            "status": { "enum": ["available", "retired", "invalid"] },
+            "createdAt": { "type": "string", "format": "date-time" },
+            "reviewedAt": { "type": "string", "format": "date-time" },
+            "sourceProjectId": { "type": "string", "format": "uuid" },
+            "sourceVersionId": { "type": "string", "format": "uuid" },
+            "sourceAssetId": { "type": "string", "minLength": 1, "maxLength": 120 },
+            "kind": { "enum": ["player", "enemy", "item", "npc", "background"] },
+            "style": { "type": "string", "minLength": 1, "maxLength": 500 },
+            "prompt": { "type": ["string", "null"], "maxLength": 4000 },
+            "provenance": { "type": "object" },
+            "licenseNote": { "type": "string", "minLength": 1, "maxLength": 1000 }
+          }
+        }
+      ]
+    }
+  }
+}

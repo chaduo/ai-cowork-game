@@ -1,0 +1,35 @@
+schema: spec-driven
+
+context: |
+  AI Cowork Game is a single-user platform for creating and incrementally editing one fixed
+  Phaser 3 top-down survival game from an idea, confirmed GDD, and validated GameSpec.
+  Frontend: Vue 3 + TypeScript + Vite + Monaco. Backend: Python 3.11+ + FastAPI + SQLite.
+  FastAPI owns the deterministic business workflow and all human/publish gates.
+  Platform V1 uses OpenGameAdapter as the first GameAgent Runtime and benchmark baseline.
+  Platform V2 must use Claude Agent SDK with PlanningAgent, AssetAgent, CodingAgent, and TestAgent.
+  OpenGame remains a fallback/reference backend in V2. Agent profiles are controlled sessions,
+  not autonomous microservices. Runtime execution uses isolated project workspaces.
+  Changes produce Candidates; only build success plus a validated PASS TestReport publishes an
+  immutable Git-backed Version. A failed Candidate never replaces the playable Version.
+
+rules:
+  proposal:
+    - State whether the change belongs to Platform V1 or Platform V2.
+    - Include explicit non-goals and dependency on the other roadmap phase when applicable.
+  specs:
+    - Use SHALL for normative requirements and include Given/When/Then scenarios.
+    - Keep FastAPI as the sole owner of GDD Confirm, GameSpec Confirm, Asset Accept, Test PASS, and Version Publish.
+  design:
+    - Document trust boundaries, runtime adapter boundaries, failure behavior, and Candidate/TestReport/Version semantics.
+  tasks:
+    - Order work as vertical slices and put contract tests before provider-specific integration.
+    - Keep V1 baseline tasks separate from V2 Claude Runtime tasks.
+
+operations:
+  apply:
+    guidance:
+      - Do not start V2 provider integration until V1 shared contracts and release gate are verified.
+      - Never let an Agent or provider-native event directly mutate platform business state.
+  archive:
+    guidance:
+      - Archive V1 before V2 because V2 depends on the V1 runtime and candidate/version contracts.

@@ -1,0 +1,246 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-cowork-game.example/schemas/gamespec-1.0.json",
+  "title": "AI Cowork Game GameSpec 契约",
+  "description": "固定 Phaser 俯视角生存游戏模板的配置契约。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "meta",
+    "world",
+    "player",
+    "enemies",
+    "items",
+    "npcs",
+    "rules",
+    "assets"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "theme", "seed"],
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "theme": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "seed": { "type": "integer", "minimum": 0, "maximum": 2147483647 }
+      }
+    },
+    "world": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height", "backgroundAssetId"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 960, "maximum": 3840 },
+        "height": { "type": "integer", "minimum": 540, "maximum": 2160 },
+        "backgroundAssetId": { "$ref": "#/$defs/id" }
+      }
+    },
+    "player": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["assetId", "spawn", "maxHealth", "moveSpeed", "attack"],
+      "properties": {
+        "assetId": { "$ref": "#/$defs/id" },
+        "spawn": { "$ref": "#/$defs/point" },
+        "maxHealth": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "moveSpeed": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000 },
+        "attack": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "damage", "cooldownMs", "range"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "damage": { "type": "integer", "minimum": 0, "maximum": 10000 },
+            "cooldownMs": { "type": "integer", "minimum": 50, "maximum": 60000 },
+            "range": { "type": "number", "minimum": 0, "maximum": 2000 }
+          }
+        }
+      }
+    },
+    "enemies": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "assetId",
+          "maxAlive",
+          "health",
+          "moveSpeed",
+          "spawnIntervalMs",
+          "contactDamage"
+        ],
+        "properties": {
+          "id": { "$ref": "#/$defs/id" },
+          "assetId": { "$ref": "#/$defs/id" },
+          "maxAlive": { "type": "integer", "minimum": 1, "maximum": 100 },
+          "health": { "type": "integer", "minimum": 1, "maximum": 10000 },
+          "moveSpeed": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000 },
+          "spawnIntervalMs": { "type": "integer", "minimum": 100, "maximum": 60000 },
+          "contactDamage": { "type": "integer", "minimum": 0, "maximum": 10000 }
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "assetId", "effect", "amount", "maxActive"],
+        "properties": {
+          "id": { "$ref": "#/$defs/id" },
+          "assetId": { "$ref": "#/$defs/id" },
+          "effect": { "enum": ["heal", "score", "speed_boost", "attack_boost"] },
+          "amount": { "type": "number", "exclusiveMinimum": 0, "maximum": 10000 },
+          "maxActive": { "type": "integer", "minimum": 1, "maximum": 100 }
+        }
+      }
+    },
+    "npcs": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "role",
+          "assetId",
+          "position",
+          "behavior",
+          "interactionRadius",
+          "dialogue"
+        ],
+        "properties": {
+          "id": { "$ref": "#/$defs/id" },
+          "name": { "type": "string", "minLength": 1, "maxLength": 40 },
+          "role": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "assetId": { "$ref": "#/$defs/id" },
+          "position": { "$ref": "#/$defs/point" },
+          "behavior": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["type"],
+                "properties": { "type": { "const": "idle" } }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["type", "speed", "waypoints"],
+                "properties": {
+                  "type": { "const": "patrol" },
+                  "speed": { "type": "number", "exclusiveMinimum": 0, "maximum": 500 },
+                  "waypoints": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 16,
+                    "items": { "$ref": "#/$defs/point" }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["type", "speed", "triggerRadius"],
+                "properties": {
+                  "type": { "const": "flee" },
+                  "speed": { "type": "number", "exclusiveMinimum": 0, "maximum": 500 },
+                  "triggerRadius": { "type": "number", "exclusiveMinimum": 0, "maximum": 2000 }
+                }
+              }
+            ]
+          },
+          "interactionRadius": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1000
+          },
+          "dialogue": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 20,
+            "items": { "type": "string", "minLength": 1, "maxLength": 280 }
+          }
+        }
+      }
+    },
+    "rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["durationSeconds", "victory", "defeat"],
+      "properties": {
+        "durationSeconds": { "type": "integer", "minimum": 10, "maximum": 3600 },
+        "victory": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "target"],
+          "properties": {
+            "type": { "enum": ["survive_time", "reach_score"] },
+            "target": { "type": "integer", "minimum": 1, "maximum": 1000000 }
+          }
+        },
+        "defeat": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": {
+            "type": { "const": "player_health_zero" }
+          }
+        }
+      }
+    },
+    "assets": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "path", "mimeType", "source", "licenseNote"],
+        "properties": {
+          "id": { "$ref": "#/$defs/id" },
+          "kind": { "enum": ["player", "enemy", "item", "npc", "background"] },
+          "path": {
+            "type": "string",
+            "pattern": "^game-assets/[A-Za-z0-9][A-Za-z0-9._/-]*$",
+            "maxLength": 240
+          },
+          "mimeType": { "enum": ["image/png", "image/webp", "image/jpeg"] },
+          "source": { "enum": ["generated", "integrated", "builtin_placeholder"] },
+          "licenseNote": { "type": "string", "minLength": 1, "maxLength": 240 },
+          "frameWidth": { "type": "integer", "minimum": 1, "maximum": 4096 },
+          "frameHeight": { "type": "integer", "minimum": 1, "maximum": 4096 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+    },
+    "point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": {
+        "x": { "type": "number", "minimum": 0, "maximum": 3840 },
+        "y": { "type": "number", "minimum": 0, "maximum": 2160 }
+      }
+    }
+  }
+}

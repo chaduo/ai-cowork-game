@@ -1,0 +1,46 @@
+## 1. Shared Contracts and Spikes
+
+- [ ] 1.1 Scaffold Vue, FastAPI, Phaser template, deployment, and test directories with pinned toolchain versions.
+- [ ] 1.2 Define runtime command/result, RunEvent, Candidate, TestReport, and Version schemas with serialization tests.
+- [ ] 1.3 Implement a Fake Runtime and a provider-neutral contract test suite for create, modify, cancel, events, artifacts, and failures.
+- [ ] 1.4 Spike the real OpenGame CLI to fix its version, non-interactive invocation, output mapping, workspace behavior, timeout, and cancellation contract.
+
+## 2. Persistent Platform Workflow
+
+- [ ] 2.1 Add SQLite migrations and repositories for projects, runs, events, Candidates, TestReports, Versions, and the single-active-run guard.
+- [ ] 2.2 Implement the deterministic GDD confirmation, GameSpec confirmation, asset acceptance, coding, build, test, and publication state transitions.
+- [ ] 2.3 Add startup recovery that fails orphaned runs and enables clean retry from the playable Version.
+- [ ] 2.4 Implement REST and SSE endpoints for project gates, runs, cancellation/retry, Candidates, TestReports, Versions, and preview metadata.
+
+## 3. Candidate-to-Version Vertical Slice
+
+- [ ] 3.1 Implement trusted project Git repositories plus workspace export without trusted `.git` or platform source.
+- [ ] 3.2 Implement Candidate snapshots, ancestry, status changes, diagnostics, and allowlisted import validation.
+- [ ] 3.3 Build the fixed Phaser survival template and validated GameSpec loader with deterministic NPC behavior.
+- [ ] 3.4 Add the read-only test bridge and Chromium checks for build, page load, console errors, movement, enemy loop, items, NPC interaction, and game outcome.
+- [ ] 3.5 Implement TestReport validation that rejects missing or contradictory PASS evidence.
+- [ ] 3.6 Implement atomic PASS-only Git Version publication, artifact storage, and playable pointer update.
+- [ ] 3.7 Add failure/cancellation integration tests proving the prior playable artifact never changes.
+
+## 4. Isolation and OpenGame Baseline
+
+- [ ] 4.1 Implement the restricted runner with workspace-only mounts, non-root execution, resource/time/output limits, and approved network/environment policy.
+- [ ] 4.2 Add path canonicalization, symlink/protected-path rejection, secret redaction, and audit tests.
+- [ ] 4.3 Implement OpenGameAdapter using the pinned spike contract and normalized RunEvents.
+- [ ] 4.4 Pass the shared runtime contract suite with OpenGame for create, incremental modify, cancellation, invalid output, and provider failure.
+- [ ] 4.5 Capture repeatable OpenGame benchmark fixtures and measurements for three baseline runs.
+
+## 5. User Workflow
+
+- [ ] 5.1 Implement access-code session protection and public-preview separation.
+- [ ] 5.2 Implement Vue views for idea input, GDD confirmation, GameSpec confirmation, asset review, run events, and cancellation.
+- [ ] 5.3 Implement Candidate/TestReport/Version history and keep iframe preview pinned to the playable Version during failures.
+- [ ] 5.4 Implement supported AI incremental modification and Monaco allowlisted edits as new Candidates.
+- [ ] 5.5 Add browser acceptance coverage for initial creation, modification, direct edit, failure protection, retry, and restore.
+
+## 6. Deployment and V1 Acceptance
+
+- [ ] 6.1 Add Compose packaging, persistent volumes, health checks, proxy routing, public artifact hosting, and runner configuration.
+- [ ] 6.2 Run the full automated suite from a clean environment and document exact setup and recovery commands.
+- [ ] 6.3 Complete three OpenGame vertical-slice rehearsals and record success rate, timing, failure stages, usage, and TestReport outcomes.
+- [ ] 6.4 Review and freeze the V1 runtime, Candidate/TestReport/Version, isolation, and RunEvent contracts required by V2.

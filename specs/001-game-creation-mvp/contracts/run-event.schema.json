@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-cowork-game.example/schemas/run-event-2.0.json",
+  "title": "AI Cowork Game 规范化运行事件",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "runId", "sequence", "stage", "type", "level", "message", "timestamp", "backend"],
+  "properties": {
+    "id": { "type": "integer", "minimum": 1 },
+    "runId": { "type": "string", "format": "uuid" },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "backend": { "enum": ["opengame", "claude", "platform"] },
+    "agentSessionId": { "type": ["string", "null"], "format": "uuid" },
+    "agentInvocationId": { "type": ["string", "null"], "format": "uuid" },
+    "agentType": { "enum": ["opengame", "planning", "asset", "coding", "test", "platform"] },
+    "candidateId": { "type": ["string", "null"], "format": "uuid" },
+    "stage": {
+      "enum": [
+        "waiting",
+        "planning_gdd",
+        "gdd_review_required",
+        "planning_gamespec",
+        "gamespec_review_required",
+        "generating_assets",
+        "asset_review_required",
+        "generating_or_modifying_code",
+        "candidate_created",
+        "installing_dependencies",
+        "validating_build",
+        "testing",
+        "repairing",
+        "retesting",
+        "version_published",
+        "build_failed",
+        "test_failed",
+        "cancelled"
+      ]
+    },
+    "type": {
+      "enum": ["status", "ai_message", "tool", "log", "error", "artifact", "usage", "test_report", "audit"]
+    },
+    "level": { "enum": ["info", "warning", "error"] },
+    "message": { "type": "string", "maxLength": 8192 },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "progress": { "type": "integer", "minimum": 0, "maximum": 100 },
+    "toolName": { "type": "string", "maxLength": 128 },
+    "toolCallId": { "type": "string", "maxLength": 256 },
+    "parentEventId": { "type": "integer", "minimum": 1 },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "modelCalls": { "type": "integer", "minimum": 0 },
+        "inputTokens": { "type": "integer", "minimum": 0 },
+        "outputTokens": { "type": "integer", "minimum": 0 },
+        "costText": { "type": "string", "maxLength": 128 }
+      }
+    }
+  }
+}

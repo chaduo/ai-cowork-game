@@ -1,0 +1,787 @@
+openapi: 3.1.0
+info:
+  title: AI Cowork Game Platform V1/V2 API
+  version: 2.0.0
+  description: 单活动项目、确定性工作流、可替换 Agent Runtime、Candidate/TestReport/Version、人工审核资源与 SSE 的 FastAPI 契约。
+servers:
+  - url: /api
+security:
+  - adminSession: []
+paths:
+  /session/unlock:
+    post:
+      operationId: unlockAdmin
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [accessCode]
+              properties:
+                accessCode: { type: string, minLength: 1, maxLength: 256, writeOnly: true }
+      responses:
+        '204': { description: 已创建带签名的管理员 cookie。 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /session:
+    delete:
+      operationId: lockAdmin
+      responses:
+        '204': { description: 已清除管理员 cookie。 }
+  /project:
+    get:
+      operationId: getProject
+      responses:
+        '200':
+          description: 当前项目。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Project' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: createProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, idea]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 80 }
+                idea: { type: string, minLength: 1, maxLength: 2000 }
+                templateId: { type: [string, 'null'], format: uuid, description: 可选的兼容 Reusable Template；平台仍执行完整门禁。 }
+      responses:
+        '201':
+          description: 项目已创建，并开始生成 GDD。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunAccepted' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /project/archive:
+    post:
+      operationId: archiveProject
+      responses:
+        '204': { description: 当前项目已归档，可顺序创建下一个隔离演示项目。 }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /project/gdd:
+    get:
+      operationId: getGdd
+      responses:
+        '200':
+          description: 当前生成的 GDD。
+          content:
+            text/markdown:
+              schema: { type: string }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /project/gdd/regenerate:
+    post:
+      operationId: regenerateGdd
+      responses:
+        '202':
+          description: 已接受新的 GDD 生成 run。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunAccepted' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /project/gdd/confirm:
+    post:
+      operationId: confirmGdd
+      responses:
+        '202':
+          description: GDD 已确认，并开始生成 GameSpec。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunAccepted' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /project/gamespec:
+    get:
+      operationId: getGameSpec
+      responses:
+        '200':
+          description: 当前 GameSpec。
+          content:
+            application/json:
+              schema: { $ref: './gamespec.schema.json' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: saveGameSpec
+      parameters:
+        - $ref: '#/components/parameters/BaselineVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: './gamespec.schema.json' }
+      responses:
+        '202':
+          description: 已创建用户修改版本和构建 run。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MutationAccepted' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /project/gamespec/confirm:
+    post:
+      operationId: confirmGameSpec
+      responses:
+        '202':
+          description: GameSpec 已确认，并开始素材阶段；素材接受前不得进入编码。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunAccepted' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /project/assets:
+    get:
+      operationId: listAssets
+      responses:
+        '200':
+          description: 当前素材清单，包含占位素材。
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Asset' }
+  /project/assets/accept:
+    post:
+      operationId: acceptAssets
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [assetIds]
+              properties:
+                assetIds:
+                  type: array
+                  minItems: 1
+                  items: { type: string }
+      responses:
+        '202':
+          description: 平台记录素材接受决定并开始 CodingAgent/OpenGame 编码阶段。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunAccepted' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /project/assets/{assetId}/regenerate:
+    post:
+      operationId: regenerateAsset
+      parameters:
+        - name: assetId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/BaselineVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request]
+              properties:
+                request: { type: string, minLength: 1, maxLength: 1000 }
+      responses:
+        '202':
+          description: 已开始素材修改 run；失败时可以使用内置占位素材。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MutationAccepted' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /project/assets/{assetId}/promote:
+    post:
+      operationId: promoteReusableAsset
+      parameters:
+        - name: assetId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '201':
+          description: 已接受且来源完整的素材已保存为 Reusable Asset。
+          content:
+            application/json:
+              schema: { $ref: './reusable-resource.schema.json' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /project/files:
+    get:
+      operationId: listFiles
+      responses:
+        '200':
+          description: 带可编辑标记的项目文件树。
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/FileEntry' }
+  /project/files/content:
+    get:
+      operationId: getFile
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 240 }
+      responses:
+        '200':
+          description: 文本文件内容。
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [path, content, editable, baselineVersionId]
+                properties:
+                  path: { type: string }
+                  content: { type: string, maxLength: 1048576 }
+                  editable: { type: boolean }
+                  baselineVersionId: { type: string, format: uuid }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: saveFile
+      parameters:
+        - $ref: '#/components/parameters/BaselineVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [path, content]
+              properties:
+                path: { type: string, minLength: 1, maxLength: 240 }
+                content: { type: string, maxLength: 1048576 }
+      responses:
+        '202':
+          description: 白名单文件已保存，并创建版本和构建 run。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MutationAccepted' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /project/modify:
+    post:
+      operationId: modifyGame
+      parameters:
+        - $ref: '#/components/parameters/BaselineVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request]
+              properties:
+                request: { type: string, minLength: 1, maxLength: 4000 }
+      responses:
+        '202':
+          description: 已开始 AI 增量修改。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MutationAccepted' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /runs/{runId}:
+    get:
+      operationId: getRun
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: 当前 run 状态。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Run' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /runs/{runId}/events:
+    get:
+      operationId: streamRunEvents
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+        - name: Last-Event-ID
+          in: header
+          required: false
+          schema: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: FastAPI SSE 流；event id 等于消息 sequence。
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /runs/{runId}/agent-sessions:
+    get:
+      operationId: listRunAgentSessions
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: 该 run 的 OpenGame 或 Claude 领域 Agent session 与用量摘要。
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AgentSession' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /runs/{runId}/cancel:
+    post:
+      operationId: cancelRun
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '202':
+          description: 已请求取消。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Run' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /runs/{runId}/retry:
+    post:
+      operationId: retryRun
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '202':
+          description: 使用原始需求，从最近成功版本开始新 run。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunAccepted' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /runs/{runId}/resume:
+    post:
+      operationId: resumeRun
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '202':
+          description: 简单 retry 的别名；不复用检查点状态。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RunAccepted' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /runs/{runId}/promote-experience:
+    post:
+      operationId: promoteDevelopmentExperience
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [kind, problem, applicability, actionSummary]
+              properties:
+                kind: { enum: [development, repair] }
+                problem: { type: string, minLength: 1, maxLength: 4000 }
+                applicability: { type: object }
+                actionSummary: { type: string, minLength: 1, maxLength: 8000 }
+      responses:
+        '201':
+          description: 成功 run 已形成经人工批准、带 PASS 证据的 Development Experience。
+          content:
+            application/json:
+              schema: { $ref: './reusable-resource.schema.json' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /candidates:
+    get:
+      operationId: listCandidates
+      responses:
+        '200':
+          description: Candidate 历史，包括失败、修复和已发布记录。
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Candidate' }
+  /candidates/{candidateId}:
+    get:
+      operationId: getCandidate
+      parameters:
+        - $ref: '#/components/parameters/CandidateId'
+      responses:
+        '200':
+          description: Candidate、Agent session 和测试状态。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Candidate' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /candidates/{candidateId}/test-report:
+    get:
+      operationId: getCandidateTestReport
+      parameters:
+        - $ref: '#/components/parameters/CandidateId'
+      responses:
+        '200':
+          description: 最近一次结构化 TestReport。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TestReport' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /candidates/{candidateId}/repair:
+    post:
+      operationId: repairCandidate
+      parameters:
+        - $ref: '#/components/parameters/CandidateId'
+      responses:
+        '202':
+          description: 平台在预算允许时启动 CodingAgent repair 和后续 retest。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MutationAccepted' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /versions:
+    get:
+      operationId: listVersions
+      responses:
+        '200':
+          description: 按最新优先排列的少量版本历史。
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Version' }
+  /versions/{versionId}:
+    get:
+      operationId: getVersion
+      parameters:
+        - $ref: '#/components/parameters/VersionId'
+      responses:
+        '200':
+          description: 版本元数据和修改文件。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Version' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /versions/{versionId}/restore:
+    post:
+      operationId: restoreVersion
+      parameters:
+        - $ref: '#/components/parameters/VersionId'
+      responses:
+        '202':
+          description: 从所选成功 commit 开始新的恢复版本和构建。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MutationAccepted' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /versions/{versionId}/promote-template:
+    post:
+      operationId: promoteReusableTemplate
+      parameters:
+        - $ref: '#/components/parameters/VersionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 120 }
+      responses:
+        '201':
+          description: 成功 Version 已人工晋升为兼容当前能力的 Reusable Template。
+          content:
+            application/json:
+              schema: { $ref: './reusable-resource.schema.json' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /resources:
+    get:
+      operationId: listReusableResources
+      parameters:
+        - name: resourceType
+          in: query
+          required: false
+          schema: { enum: [template, experience, asset] }
+        - name: status
+          in: query
+          required: false
+          schema: { enum: [available, retired, invalid] }
+      responses:
+        '200':
+          description: 少量人工审核资源；不执行向量或语义检索。
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: './reusable-resource.schema.json' }
+  /resources/assets/{resourceId}/reuse:
+    post:
+      operationId: reuseAssetInActiveProject
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '202':
+          description: 资源复制到当前活动项目的隔离 Workspace，并记录 ResourceUse。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MutationAccepted' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /resources/experiences/{resourceId}/skill-candidates:
+    post:
+      operationId: createSkillCandidate
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 120 }
+      responses:
+        '201':
+          description: 仅创建不生效的 Skill Candidate；不会修改 Formal Skill。
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SkillCandidate' }
+        '409': { $ref: '#/components/responses/Conflict' }
+components:
+  securitySchemes:
+    adminSession:
+      type: apiKey
+      in: cookie
+      name: acg_admin
+  parameters:
+    BaselineVersion:
+      name: If-Match-Version
+      in: header
+      required: true
+      schema: { type: string, format: uuid }
+    RunId:
+      name: runId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    VersionId:
+      name: versionId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    CandidateId:
+      name: candidateId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  responses:
+    Unauthorized:
+      description: 缺少部署访问会话，或会话无效。
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Forbidden:
+      description: 路径或操作不在白名单内。
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: 资源不存在。
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Conflict:
+      description: 另一个任务正在运行、基线已过期或状态无效。
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    ValidationError:
+      description: 输入或 GameSpec 校验失败。
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Project:
+      type: object
+      required: [id, name, originalIdea, state, runtimeBackend, assetReviewStatus, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        originalIdea: { type: string }
+        state: { enum: [draft, waiting_confirmation, generating, playable, failed, archived] }
+        latestCandidateId: { type: [string, 'null'], format: uuid }
+        playableVersionId: { type: [string, 'null'], format: uuid }
+        activeRunId: { type: [string, 'null'], format: uuid }
+        runtimeBackend: { enum: [opengame, claude] }
+        assetReviewStatus: { enum: [not_started, pending_review, accepted, rejected] }
+        assetReviewedAt: { type: [string, 'null'], format: date-time }
+        archivedAt: { type: [string, 'null'], format: date-time }
+        previewUrl: { type: [string, 'null'], format: uri-reference }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    Run:
+      type: object
+      required: [id, projectId, runtimeBackend, operation, status, stage, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        candidateId: { type: [string, 'null'], format: uuid }
+        parentRunId: { type: [string, 'null'], format: uuid }
+        runtimeBackend: { enum: [opengame, claude] }
+        operation: { enum: [generate_gdd, generate_gamespec, generate_assets, generate_game, modify, user_build, repair, test, retry, resume, restore, reuse_resource] }
+        status: { enum: [pending, running, cancelling, succeeded, failed, cancelled] }
+        stage:
+          enum: [waiting, planning_gdd, gdd_review_required, planning_gamespec, gamespec_review_required, generating_assets, asset_review_required, generating_or_modifying_code, candidate_created, installing_dependencies, validating_build, testing, repairing, retesting, version_published, build_failed, test_failed, cancelled]
+        requestText: { type: [string, 'null'] }
+        errorMessage: { type: [string, 'null'] }
+        startedAt: { type: [string, 'null'], format: date-time }
+        endedAt: { type: [string, 'null'], format: date-time }
+        createdAt: { type: string, format: date-time }
+    AgentSession:
+      type: object
+      additionalProperties: false
+      required: [id, runId, agentType, backend, status, toolPolicyId, attempt]
+      properties:
+        id: { type: string, format: uuid }
+        runId: { type: string, format: uuid }
+        agentType: { enum: [opengame, planning, asset, coding, test] }
+        backend: { enum: [opengame, claude] }
+        providerSessionId: { type: [string, 'null'] }
+        status: { enum: [pending, running, succeeded, failed, cancelled] }
+        toolPolicyId: { type: string }
+        attempt: { type: integer, minimum: 1 }
+        modelName: { type: [string, 'null'] }
+        usage: { type: [object, 'null'], additionalProperties: true }
+        startedAt: { type: [string, 'null'], format: date-time }
+        endedAt: { type: [string, 'null'], format: date-time }
+    Version:
+      type: object
+      required: [id, number, candidateId, source, summary, modifiedFiles, gitCommit, testReportId, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: integer, minimum: 1 }
+        parentVersionId: { type: [string, 'null'], format: uuid }
+        runId: { type: [string, 'null'], format: uuid }
+        candidateId: { type: string, format: uuid }
+        source: { enum: [initial, ai, user, retry, restore] }
+        requestText: { type: [string, 'null'] }
+        summary: { type: string }
+        modifiedFiles:
+          type: array
+          items: { type: string }
+        gitCommit: { type: string, minLength: 7, maxLength: 64 }
+        testReportId: { type: string, format: uuid }
+        buildLogPath: { type: [string, 'null'] }
+        artifactPath: { type: [string, 'null'] }
+        previewUrl: { type: [string, 'null'], format: uri-reference }
+        createdAt: { type: string, format: date-time }
+    Candidate:
+      type: object
+      required: [id, runId, attempt, source, summary, modifiedFiles, buildStatus, testStatus, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        runId: { type: string, format: uuid }
+        parentVersionId: { type: [string, 'null'], format: uuid }
+        parentCandidateId: { type: [string, 'null'], format: uuid }
+        publishedVersionId: { type: [string, 'null'], format: uuid }
+        attempt: { type: integer, minimum: 1 }
+        source: { enum: [initial, ai, user, repair, restore] }
+        summary: { type: string }
+        modifiedFiles:
+          type: array
+          items: { type: string }
+        buildStatus: { enum: [pending, running, succeeded, failed, cancelled] }
+        testStatus: { enum: [pending, running, passed, failed, invalid, cancelled] }
+        createdAt: { type: string, format: date-time }
+    TestReport:
+      type: object
+      required: [id, candidateId, attempt, checks, failedChecks, verdict, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        candidateId: { type: string, format: uuid }
+        agentSessionId: { type: [string, 'null'], format: uuid }
+        attempt: { type: integer, minimum: 1 }
+        checks:
+          type: array
+          minItems: 8
+          maxItems: 8
+          items:
+            type: object
+            additionalProperties: false
+            required: [checkId, status, evidence]
+            properties:
+              checkId: { enum: [build, page_load, console_errors, player_movement, enemy_loop, item_collection, npc_interaction, game_outcome] }
+              status: { enum: [pass, fail] }
+              evidence:
+                type: array
+                minItems: 1
+                items: { type: string }
+              message: { type: [string, 'null'] }
+        failedChecks:
+          type: array
+          items: { type: string }
+        verdict: { enum: [pass, fail, invalid] }
+        createdAt: { type: string, format: date-time }
+    Asset:
+      type: object
+      required: [id, kind, path, source, licenseNote, reviewStatus]
+      properties:
+        id: { type: string }
+        kind: { enum: [player, enemy, item, npc, background] }
+        path: { type: string }
+        source: { enum: [generated, integrated, builtin_placeholder] }
+        licenseNote: { type: string }
+        reviewStatus: { enum: [pending_review, accepted, rejected] }
+        reviewedAt: { type: [string, 'null'], format: date-time }
+    SkillCandidate:
+      type: object
+      additionalProperties: false
+      required: [id, sourceExperienceId, name, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        sourceExperienceId: { type: string, format: uuid }
+        name: { type: string }
+        status: { enum: [pending_review, approved, rejected] }
+        createdAt: { type: string, format: date-time }
+        reviewedAt: { type: [string, 'null'], format: date-time }
+    FileEntry:
+      type: object
+      required: [path, kind, editable]
+      properties:
+        path: { type: string }
+        kind: { enum: [file, directory] }
+        editable: { type: boolean }
+    RunAccepted:
+      type: object
+      required: [run]
+      properties:
+        run: { $ref: '#/components/schemas/Run' }
+    MutationAccepted:
+      type: object
+      required: [run, candidate]
+      properties:
+        run: { $ref: '#/components/schemas/Run' }
+        candidate: { $ref: '#/components/schemas/Candidate' }
+    Problem:
+      type: object
+      required: [status, code, message]
+      properties:
+        status: { type: integer, minimum: 400, maximum: 599 }
+        code: { type: string }
+        message: { type: string }
+        details: {}
