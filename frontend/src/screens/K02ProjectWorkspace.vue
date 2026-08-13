@@ -37,6 +37,7 @@ import {
   prepareReleaseReview,
   publishRelease as publishProjectRelease,
   createReleaseDraftForProject,
+  getCurrentRelease,
   getCurrentPlayable,
   restorePlayable,
   acknowledgeResourceBridge as acknowledgeProjectResourceBridge,
@@ -48,7 +49,7 @@ import {
   updateReleaseDraft,
 } from '../stores/projectStore'
 
-const props = withDefaults(defineProps<{ design: ConfirmedGameDesign; initialRelease?: ReleaseRecord | null; resourcePendingCount?: number }>(), { initialRelease: null, resourcePendingCount: 3 })
+const props = withDefaults(defineProps<{ design: ConfirmedGameDesign; resourcePendingCount?: number }>(), { resourcePendingCount: 0 })
 const emit = defineEmits<{ back: []; resources: []; reviewResources: [release: ReleaseRecord] }>()
 
 const session = getActiveProject()!
@@ -67,7 +68,7 @@ const releasePhase = computed(() => session.releasePhase)
 const resourceBridgeAcknowledged = computed(() => session.resourceBridgeAcknowledged)
 const playable = computed(() => getCurrentPlayable(session))
 const playableVersion = computed(() => playable.value?.version ?? 0)
-const currentRelease = computed<ReleaseRecord | null>(() => session.releases.at(-1) ?? props.initialRelease ?? null)
+const currentRelease = computed<ReleaseRecord | null>(() => getCurrentRelease(session))
 const releaseDraft = session.releaseDraft
 
 function createReleaseDraft(): ReleaseDraft {
