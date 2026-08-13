@@ -11,8 +11,10 @@ import {
 } from 'lucide-vue-next'
 import CreativeKickoffModal from '../components/kickoff/CreativeKickoffModal.vue'
 import type { ConfirmedGameDesign } from '../components/kickoff/kickoffTypes'
+import type { ProjectSession } from '../stores/projectStore'
 
-const emit = defineEmits<{ enterWorkspace: [design: ConfirmedGameDesign]; resources: [] }>()
+const props = defineProps<{ projects: ProjectSession[] }>()
+const emit = defineEmits<{ enterWorkspace: [design: ConfirmedGameDesign]; openProject: [projectId: string]; resources: [] }>()
 
 type GameTemplate = {
   id: string
@@ -80,6 +82,23 @@ const selectedTemplate = computed(() =>
   templates.find((template) => template.id === selectedTemplateId.value) ?? null,
 )
 const canCreate = computed(() => idea.value.trim().length > 0)
+const projects = computed(() => [...props.projects].sort((left, right) => right.updatedAt - left.updatedAt))
+
+function projectStage(project: ProjectSession): string {
+  if (project.releases.length > 0) return 'Released'
+  if (project.playableVersions.length > 0) return 'Playable'
+  if (project.phase.includes('build') || project.phase.includes('change')) return 'Building'
+  return 'GameSpec'
+}
+
+function relativeUpdatedAt(updatedAt: number): string {
+  const elapsedMinutes = Math.max(0, Math.floor((Date.now() - updatedAt) / 60_000))
+  if (elapsedMinutes < 1) return '刚刚更新'
+  if (elapsedMinutes < 60) return `${elapsedMinutes} 分钟前更新`
+  const elapsedHours = Math.floor(elapsedMinutes / 60)
+  if (elapsedHours < 24) return `${elapsedHours} 小时前更新`
+  return `${Math.floor(elapsedHours / 24)} 天前更新`
+}
 
 function scrollToTemplates() {
   templateSectionRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -151,6 +170,18 @@ function onIdeaKeydown(event: KeyboardEvent) {
     </header>
 
     <main>
+      <section v-if="projects.length" class="project-list" aria-labelledby="project-list-title">
+        <div class="project-list-heading"><div><span>MY PROJECTS</span><h2 id="project-list-title">我的项目</h2></div><strong>{{ projects.length }}</strong></div>
+        <div class="project-list-items">
+          <button v-for="project in projects" :key="project.id" class="project-list-item" type="button" @click="$emit('openProject', project.id)">
+            <span class="project-list-icon"><Gamepad2 :size="17" /></span>
+            <span class="project-list-copy"><strong>{{ project.design.projectTitle }}</strong><small>{{ relativeUpdatedAt(project.updatedAt) }}</small></span>
+            <span class="project-list-stage">{{ projectStage(project) }}</span>
+            <ArrowRight :size="16" />
+          </button>
+        </div>
+      </section>
+
       <section id="creator" ref="creatorRef" class="creator-hero" aria-labelledby="creator-title">
         <div class="creator-index" aria-hidden="true"><span>01</span><i></i><span>IDEA</span></div>
         <h1 id="creator-title">把一个想法，变成可玩的游戏</h1>

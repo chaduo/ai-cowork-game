@@ -4,28 +4,29 @@ import { computed, ref } from 'vue'
 import ResourceGalleryCard from '../components/resources/ResourceGalleryCard.vue'
 import SavedResourceDetail from '../components/resources/SavedResourceDetail.vue'
 import type { ResourceCandidate, ResourceCandidateType } from '../components/resources/resourceTypes'
+import { projectStore } from '../stores/projectStore'
 
-const props = defineProps<{ resources: ResourceCandidate[] }>()
 const emit = defineEmits<{ projects: []; updateMetadata: [payload: { id: string; name: string; summary: string }] }>()
 type ResourceFilter = 'all' | ResourceCandidateType
 
 const query = ref('')
 const filter = ref<ResourceFilter>('all')
 const selectedId = ref<string | null>(null)
-const selected = computed(() => props.resources.find((resource) => resource.id === selectedId.value) ?? null)
+const resources = computed(() => projectStore.savedResources)
+const selected = computed(() => resources.value.find((resource) => resource.id === selectedId.value) ?? null)
 const filters: { id: ResourceFilter; label: string }[] = [
   { id: 'all', label: '全部' }, { id: 'gameplay', label: '玩法' }, { id: 'ui', label: 'UI' }, { id: 'visual', label: '美术' },
 ]
 const filteredResources = computed(() => {
   const normalized = query.value.trim().toLocaleLowerCase()
-  return props.resources.filter((resource) => {
+  return resources.value.filter((resource) => {
     if (filter.value !== 'all' && resource.type !== filter.value) return false
     if (!normalized) return true
     return [resource.name, resource.summary, resource.cardSummary, resource.provenance.projectName]
       .join(' ').toLocaleLowerCase().includes(normalized)
   })
 })
-const hasSavedResources = computed(() => props.resources.length > 0)
+const hasSavedResources = computed(() => resources.value.length > 0)
 </script>
 
 <template>

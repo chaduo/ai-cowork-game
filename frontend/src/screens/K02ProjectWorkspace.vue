@@ -26,7 +26,6 @@ import {
   applySpecRevision,
   cancelChange as cancelProjectChange,
   confirmSpecAndStartBuild,
-  createProject,
   getActiveProject,
   requestChange as requestProjectChange,
   requestSpecConfirmation,
@@ -58,7 +57,7 @@ const requestedScreen = new URLSearchParams(window.location.search).get('screen'
 const startInBuild = requestedScreen === 'build'
 const startInChange = requestedScreen === 'change'
 const startInPublish = requestedScreen === 'publish' || requestedScreen === 'resources'
-const session = getActiveProject() ?? createProject(props.design)
+const session = getActiveProject()!
 const phase = computed(() => session.phase)
 const activeTab = ref<ArtifactTab>(startInPublish || startInChange ? 'preview' : startInBuild ? 'build' : 'gamespec')
 const selectedContext = ref<SpecContext | null>(null)
