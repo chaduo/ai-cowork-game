@@ -365,7 +365,7 @@ onBeforeUnmount(() => {
         <BuildPreview
           v-else-if="activeTab === 'preview' && (isBuildMode || isChangeMode)"
           :phase="phase as BuildPhase | ChangePhase"
-          :playable-version="playableVersion"
+          :playable="playable"
           :release="currentRelease"
           :resource-bridge-acknowledged="resourceBridgeAcknowledged"
           :resource-pending-count="resourcePendingCount"
@@ -376,8 +376,8 @@ onBeforeUnmount(() => {
           @resource-later="acknowledgeResourceBridge"
           @resource-review="reviewResources"
         />
-        <AssetGalleryReadOnly v-else-if="activeTab === 'assets' && (isBuildMode || isChangeMode)" />
-        <CodeReadOnlyState v-else-if="activeTab === 'code' && (isBuildMode || isChangeMode)" />
+        <AssetGalleryReadOnly v-else-if="activeTab === 'assets' && (isBuildMode || isChangeMode)" :project-title="playable?.snapshot.projectTitle ?? session.spec.title" :npc-names="playable?.snapshot.npcNames ?? []" />
+        <CodeReadOnlyState v-else-if="activeTab === 'code' && (isBuildMode || isChangeMode)" :project-title="playable?.snapshot.projectTitle ?? session.spec.title" />
         <ArtifactEmptyState v-else :tab="emptyArtifactTab" />
       </div>
 

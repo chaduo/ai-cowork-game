@@ -59,7 +59,7 @@ function submitRequest() {
       <template v-if="phase === 'showing_recommendations'">
         <div class="first-playable-summary">
           <span><Check :size="14" />第一版已经完成</span>
-          <p>种植与收获、基础经济、Lucy 委托、好感成长和代际目标已经形成完整可玩循环。</p>
+          <p>核心行动、关系反馈和阶段目标已经形成完整可玩循环。</p>
         </div>
         <p class="change-ai-copy">接下来可以继续完善其中一个方向。推荐只是起点，你也可以自己描述。</p>
         <NextStepRecommendations @select="$emit('select', $event)" />
@@ -88,7 +88,7 @@ function submitRequest() {
           <span>AI</span>
           <p v-if="phase === 'reusing_unaffected_content'">正在复用农场场景、角色、种植、经济和音频内容。</p>
           <p v-else-if="phase === 'applying_gameplay_change'">关系成长事件现在会在 Favor 达到 30 时触发。</p>
-          <p v-else-if="phase === 'applying_visual_change'">正在加入心形好感条；Lucy 原有角色素材继续复用。</p>
+          <p v-else-if="phase === 'applying_visual_change'">正在加入关系反馈条；现有角色素材继续复用。</p>
           <p v-else-if="phase === 'checking_scope'">正在确认修改只发生在预期范围…</p>
           <p v-else-if="phase === 'scope_violation'"><TriangleAlert :size="13" />检测到超出预期范围的修改，工作版本已停止。</p>
           <p v-else-if="phase === 'building_working_version'">因为玩法规则发生变化，正在重新构建完整运行版本。</p>
@@ -112,7 +112,7 @@ function submitRequest() {
           v-model="request"
           rows="4"
           :disabled="!['showing_recommendations', 'playing_v1'].includes(phase)"
-          placeholder="例如：Lucy 的好感度增长太慢了，每次任务从 +5 改成 +10。"
+          placeholder="例如：关系成长反馈太慢了，希望每次任务的增量更明显。"
         ></textarea>
         <button type="submit" :disabled="!request.trim() || !['showing_recommendations', 'playing_v1'].includes(phase)"><Send :size="14" />分析这次修改 <Circle :size="11" /></button>
       </form>

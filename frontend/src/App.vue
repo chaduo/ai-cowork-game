@@ -58,7 +58,7 @@ function openWorkspace(projectId: string) {
 
 <template>
   <MyResources v-if="surface === 'resources'" @projects="surface = 'projects'" @update-metadata="updateSavedMetadata" />
-  <ResourceReviewWorkspace v-else-if="surface === 'review' && reviewedRelease && activeProject" :project-id="activeProject.id" :release="reviewedRelease" @back="closeResourceReview()" @resources="closeResourceReview('resources')" @projects="closeResourceReview('projects')" />
+  <ResourceReviewWorkspace v-else-if="surface === 'review' && reviewedRelease && activeProject" :project-id="activeProject.id" :project-name="activeProject.spec.title" :release="reviewedRelease" @back="closeResourceReview()" @resources="closeResourceReview('resources')" @projects="closeResourceReview('projects')" />
   <K02ProjectWorkspace v-else-if="surface === 'workspace' && activeProject" :key="activeProject.id" :design="activeProject.design" :initial-release="reviewedRelease" :resource-pending-count="pendingResourceCount" @back="surface = 'projects'" @resources="surface = 'resources'" @review-resources="openResourceReview" />
   <K01CreateProject v-else :projects="projectStore.projects" @open-project="openWorkspace" @enter-workspace="enterWorkspace" @resources="surface = 'resources'" />
 </template>

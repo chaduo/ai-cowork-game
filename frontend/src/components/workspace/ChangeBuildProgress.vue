@@ -47,7 +47,7 @@ const activeStep = computed(() => props.plan.progress[activeIndex.value]!)
           <strong>继续使用</strong><span v-for="item in plan.reused" :key="item"><Check :size="12" />{{ item }}</span>
         </div>
         <div v-else-if="activeStep.id === 'gameplay'" class="rule-change-evidence"><strong>关系事件触发条件</strong><span>Favor ≥ 30</span><b>→ Relationship Event</b></div>
-        <div v-else-if="activeStep.id === 'visual'" class="visual-change-evidence"><strong>心形 Favor Bar</strong><span><Check :size="12" />Favor 变化时同步更新</span><span><RotateCcw :size="12" />Lucy 角色素材继续复用</span></div>
+        <div v-else-if="activeStep.id === 'visual'" class="visual-change-evidence"><strong>关系反馈 UI</strong><span><Check :size="12" />Favor 变化时同步更新</span><span><RotateCcw :size="12" />现有角色素材继续复用</span></div>
         <div v-else-if="activeStep.id === 'scope'" class="scope-check-evidence"><ShieldCheck :size="16" /><span><strong>正在确认修改只发生在预期范围</strong><small>{{ plan.scopeExpected.join(' · ') }}</small></span></div>
         <div v-else-if="activeStep.id === 'build'" class="scope-check-evidence"><LoaderCircle :size="16" class="spin" /><span><strong>重新构建完整运行版本</strong><small>未受影响内容不会重新生成。</small></span></div>
         <div v-else class="scope-check-evidence"><ShieldCheck :size="16" /><span><strong>Playable v1 始终安全</strong><small>所有修改只发生在隔离的工作版本。</small></span></div>

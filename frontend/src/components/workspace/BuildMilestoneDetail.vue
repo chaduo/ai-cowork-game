@@ -30,7 +30,7 @@ defineEmits<{ retry: [] }>()
     <div v-if="phase === 'build_error'" class="build-error-callout">
       <TriangleAlert :size="18" />
       <div>
-        <strong>Lucy 的角色素材没有生成完成</strong>
+        <strong>角色素材没有生成完成</strong>
         <p>Foundation、Core Gameplay 和 NPC 逻辑已经保留。只需要重新尝试 Presentation。</p>
       </div>
       <button type="button" @click="$emit('retry')"><RotateCcw :size="14" />重新尝试此阶段</button>

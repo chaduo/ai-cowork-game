@@ -11,7 +11,7 @@ import {
   undoCandidate as undoCandidateStore,
 } from '../stores/projectStore'
 
-const props = defineProps<{ projectId: string; release: ReleaseRecord }>()
+const props = defineProps<{ projectId: string; projectName?: string; release: ReleaseRecord }>()
 const emit = defineEmits<{ back: []; resources: []; projects: [] }>()
 const batch = computed(() => extractCandidatesForRelease(props.projectId, props.release.id))
 const candidates = computed(() => batch.value.map((item) => item.candidate))
@@ -62,7 +62,7 @@ function leaveReview(destination: 'resources' | 'projects') {
     <header class="resource-review-header">
       <div class="workspace-brand"><span><Gamepad2 :size="17" /></span><strong>AI Cowork Game</strong></div>
       <nav class="resource-review-global-nav" aria-label="全局导航"><button type="button" @click="leaveReview('projects')">Projects</button><button type="button" @click="leaveReview('resources')">我的资源</button></nav>
-      <div class="workspace-project"><span>PROJECT</span><h1>多代田园物语</h1></div>
+      <div class="workspace-project"><span>PROJECT</span><h1>{{ props.projectName ?? '当前项目' }}</h1></div>
       <div class="resource-review-release"><PackageCheck :size="15" /><span><strong>Release v{{ release.version }}</strong><small>基于 Playable v{{ release.basedOnPlayable }}</small></span></div>
     </header>
 
