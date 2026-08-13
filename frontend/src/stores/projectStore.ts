@@ -5,6 +5,7 @@ import type { BuildPhase } from '../components/workspace/buildTypes'
 import { createChangePlan } from '../components/workspace/changeFixture'
 import type { ChangePhase, ChangePlan, ChangeSource } from '../components/workspace/changeTypes'
 import { createGameSpecFixture } from '../components/workspace/gameSpecFixture'
+import { createResourceCandidates as createResourceCandidatesFixture } from '../components/resources/resourceFixtures'
 import type { ReleaseDraft, ReleasePhase, ReleaseRecord } from '../components/workspace/releaseTypes'
 import type {
   CoworkMessage,
@@ -75,6 +76,89 @@ export function getPendingResourceCount(session: ProjectSession): number {
   if (!release) return 0
   const batch = session.resourceBatches[release.id] ?? []
   return batch.filter((item) => item.state === 'pending' || item.state === 'saving').length
+}
+
+export function extractCandidatesForRelease(projectId: string, releaseId: string): ResourceBatchItem[] {
+  return getProject(projectId)?.resourceBatches[releaseId] ?? []
+}
+
+function findBatchItem(projectId: string, releaseId: string, candidateId: string): ResourceBatchItem | null {
+  return extractCandidatesForRelease(projectId, releaseId).find((item) => item.candidate.id === candidateId) ?? null
+}
+
+function cloneResource(resource: ResourceCandidate): ResourceCandidate {
+  return {
+    ...resource,
+    configurableFields: resource.configurableFields.map((field) => ({ ...field })),
+    reusableFor: [...resource.reusableFor],
+    removedProjectContent: [...resource.removedProjectContent],
+    included: [...resource.included],
+    excluded: [...resource.excluded],
+  }
+}
+
+export function createResourceCandidates(session: ProjectSession, release: ReleaseRecord): ResourceCandidate[] {
+  const savedIds = new Set(projectStore.savedResources.map((resource) => resource.id))
+  const ignoredIds = new Set(
+    Object.entries(session.resourceBatches)
+      .filter(([releaseId]) => releaseId !== release.id)
+      .flatMap(([, batch]) => batch.filter((item) => item.state === 'ignored').map((item) => item.candidate.id)),
+  )
+  return createResourceCandidatesFixture(session, release).filter((candidate) => !savedIds.has(candidate.id) && !ignoredIds.has(candidate.id))
+}
+
+export function saveCandidate(projectId: string, releaseId: string, candidateId: string): void {
+  const session = getProject(projectId)
+  const item = findBatchItem(projectId, releaseId, candidateId)
+  if (!session || !item || item.state !== 'pending') return
+  item.state = 'saving'
+  item.candidate.status = 'saving'
+  touchProject(session)
+  scheduleJob(projectId, `resource-save:${releaseId}:${candidateId}`, () => {
+    const completed = findBatchItem(projectId, releaseId, candidateId)
+    if (!completed || completed.state !== 'saving') return
+    completed.state = 'saved'
+    completed.candidate.status = 'saved'
+    const savedIndex = projectStore.savedResources.findIndex((resource) => resource.id === candidateId)
+    const saved = cloneResource(completed.candidate)
+    if (savedIndex === -1) projectStore.savedResources.push(saved)
+    else projectStore.savedResources[savedIndex] = saved
+    touchProject(session)
+  }, 420)
+}
+
+export function ignoreCandidate(projectId: string, releaseId: string, candidateId: string): void {
+  const session = getProject(projectId)
+  const item = findBatchItem(projectId, releaseId, candidateId)
+  if (!session || !item || item.state !== 'pending') return
+  item.state = 'ignored'
+  item.candidate.status = 'ignored'
+  touchProject(session)
+}
+
+export function undoCandidate(projectId: string, releaseId: string, candidateId: string): void {
+  const session = getProject(projectId)
+  const item = findBatchItem(projectId, releaseId, candidateId)
+  if (!session || !item || (item.state !== 'saved' && item.state !== 'ignored')) return
+  if (item.state === 'saved') {
+    const savedIndex = projectStore.savedResources.findIndex((resource) => resource.id === candidateId)
+    if (savedIndex !== -1) projectStore.savedResources.splice(savedIndex, 1)
+  }
+  item.state = 'pending'
+  item.candidate.status = 'pending'
+  touchProject(session)
+}
+
+export function updateSavedResourceMetadata(candidateId: string, patch: Pick<ResourceCandidate, 'name' | 'summary'>): void {
+  const saved = projectStore.savedResources.find((resource) => resource.id === candidateId)
+  if (!saved) return
+  Object.assign(saved, patch, { cardSummary: patch.summary })
+  for (const session of projectStore.projects) {
+    for (const batch of Object.values(session.resourceBatches)) {
+      const item = batch.find((entry) => entry.candidate.id === candidateId && entry.state === 'saved')
+      if (item) Object.assign(item.candidate, patch, { cardSummary: patch.summary })
+    }
+  }
 }
 
 export function createPlayableSnapshot(session: ProjectSession): PlayableVersionRecord['snapshot'] {
@@ -510,13 +594,14 @@ export function publishRelease(projectId: string): void {
       touchProject(session)
       return
     }
-    const release = {
+    const release: ReleaseRecord = {
       ...session.releaseDraft,
       id: `release-v${session.releaseDraft.version}`,
       status: 'published' as const,
       createdAt: '刚刚',
     }
     session.releases.push(release)
+    session.resourceBatches[release.id] = createResourceCandidates(session, release).map((candidate) => ({ candidate, state: 'pending' }))
     session.releasePhase = 'success'
     touchProject(session)
   }, 900)

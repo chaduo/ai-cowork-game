@@ -1,7 +1,14 @@
 import type { ResourceCandidate } from './resourceTypes'
+import type { ProjectSession } from '../../stores/projectStore'
+import type { ReleaseRecord } from '../workspace/releaseTypes'
 
-export function createResourceCandidates(): ResourceCandidate[] {
-  const provenance = { projectName: '多代田园物语', releaseVersion: 'Release v1', playableVersion: 'Playable v2', gameSpecVersion: 'GameSpec v2' }
+export function createResourceCandidates(session: ProjectSession, release: ReleaseRecord): ResourceCandidate[] {
+  const provenance = {
+    projectName: session.spec.title,
+    releaseVersion: `Release v${release.version}`,
+    playableVersion: `Playable v${release.basedOnPlayable}`,
+    gameSpecVersion: `GameSpec v${release.basedOnGameSpec}`,
+  }
   const checks = { boundaryChecked: true, projectSpecificContentRemoved: true, parameterizable: true }
   return [
     {
@@ -43,12 +50,4 @@ export function createResourceCandidates(): ResourceCandidate[] {
       ], provenance, extractionChecks: checks,
     },
   ]
-}
-
-export function createSavedResources(): ResourceCandidate[] {
-  return createResourceCandidates().map((resource) => ({
-    ...resource,
-    status: 'saved',
-    configurableFields: resource.configurableFields.map((field) => ({ ...field })),
-  }))
 }

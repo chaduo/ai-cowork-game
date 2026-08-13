@@ -25,6 +25,7 @@ const filteredResources = computed(() => {
       .join(' ').toLocaleLowerCase().includes(normalized)
   })
 })
+const hasSavedResources = computed(() => props.resources.length > 0)
 </script>
 
 <template>
@@ -42,11 +43,11 @@ const filteredResources = computed(() => {
         <label class="resource-search"><Search :size="16" /><input v-model="query" type="search" placeholder="搜索资源" aria-label="搜索资源" /><button v-if="query" type="button" aria-label="清空搜索" @click="query = ''"><X :size="14" /></button></label>
         <div class="resource-filter-tabs" role="group" aria-label="资源分类"><button v-for="item in filters" :key="item.id" type="button" :class="{ active: filter === item.id }" @click="filter = item.id">{{ item.label }}</button></div>
       </section>
-      <p class="resource-result-count">{{ filteredResources.length }} 项资源</p>
+      <p v-if="hasSavedResources" class="resource-result-count">{{ filteredResources.length }} 项资源</p>
       <section v-if="filteredResources.length" class="saved-resource-grid" aria-label="已保存资源">
         <ResourceGalleryCard v-for="resource in filteredResources" :key="resource.id" :resource="resource" @open="selectedId = $event" />
       </section>
-      <section v-else class="resource-gallery-empty"><Boxes :size="25" /><h2>没有找到匹配的资源</h2><p>换一个关键词，或者查看其他分类。</p></section>
+      <section v-else class="resource-gallery-empty"><Boxes :size="25" /><h2>{{ hasSavedResources ? '没有找到匹配的资源' : '还没有保存的资源' }}</h2><p>{{ hasSavedResources ? '换一个关键词，或者查看其他分类。' : '完成发布后，可以把值得复用的内容保存到这里。' }}</p></section>
     </main>
   </div>
 </template>
