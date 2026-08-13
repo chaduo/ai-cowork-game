@@ -95,7 +95,11 @@ export function createProjectSession(design: ConfirmedGameDesign): ProjectSessio
     playableVersions: [],
     releases: [],
     phase: 'generating',
-    messages: [],
+    messages: [{
+      id: 'spec-start',
+      role: 'ai',
+      text: '游戏设计已经确认。我正在把它整理成第一版可以实际制作的游戏规格，并会主动控制范围，避免第一版过大。',
+    }],
     changePlan: null,
     releasePhase: 'review',
     releaseDraft: {
@@ -184,7 +188,7 @@ export function getDebugFlags(): WorkspaceDebugFlags {
   return debugFlags
 }
 
-type ErrorInjectionKind = 'generation' | 'build' | 'scope'
+type ErrorInjectionKind = 'generation' | 'build' | 'scope' | 'publish'
 const consumedErrorInjections = new Map<string, Set<ErrorInjectionKind>>()
 
 function consumeErrorInjection(projectId: string, kind: ErrorInjectionKind): boolean {
@@ -210,7 +214,7 @@ export function startGeneration(projectId: string): void {
       return
     }
     session.phase = 'review'
-    session.messages.push({
+    if (!session.messages.some((message) => message.id === 'spec-ready')) session.messages.push({
       id: 'spec-ready',
       role: 'ai',
       text: session.design.scenarioId === 'coffee-shop'
@@ -397,4 +401,57 @@ export function retryScopeViolation(projectId: string): void {
   session.phase = 'reusing_unaffected_content'
   touchProject(session)
   advanceChange(projectId, 1)
+}
+
+export function setWorkspacePhase(projectId: string, nextPhase: WorkspacePhase): void {
+  const session = getProject(projectId)
+  if (!session) return
+  session.phase = nextPhase
+  touchProject(session)
+}
+
+export function seedChangeDemo(projectId: string, nextPhase: 'showing_recommendations' | 'playable_v2_ready'): void {
+  const session = getProject(projectId)
+  if (!session) return
+  clearJob(projectId, 'change')
+  session.changePlan = createChangePlan('suggested_next_step')
+  session.phase = nextPhase
+  touchProject(session)
+}
+
+export function prepareReleaseReview(projectId: string): void {
+  const session = getProject(projectId)
+  if (!session) return
+  session.releasePhase = 'review'
+  touchProject(session)
+}
+
+export function updateReleaseDraft(projectId: string, patch: Partial<ReleaseDraft>): void {
+  const session = getProject(projectId)
+  if (!session) return
+  Object.assign(session.releaseDraft, patch)
+  touchProject(session)
+}
+
+export function publishRelease(projectId: string): void {
+  const session = getProject(projectId)
+  if (!session || (session.releasePhase !== 'review' && session.releasePhase !== 'error')) return
+  session.releasePhase = 'publishing'
+  touchProject(session)
+  scheduleJob(projectId, 'publish', () => {
+    if (debugFlags.publishError && consumeErrorInjection(projectId, 'publish')) {
+      session.releasePhase = 'error'
+      touchProject(session)
+      return
+    }
+    const release = {
+      ...session.releaseDraft,
+      id: `release-v${session.releaseDraft.version}`,
+      status: 'published' as const,
+      createdAt: '刚刚',
+    }
+    session.releases.push(release)
+    session.releasePhase = 'success'
+    touchProject(session)
+  }, 900)
 }

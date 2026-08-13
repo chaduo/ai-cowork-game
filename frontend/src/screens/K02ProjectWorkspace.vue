@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ArrowLeft, ArrowRight, Check, ChevronRight, FileCode2, Gamepad2, Hammer, Image, LoaderCircle, MonitorPlay, ScrollText, SlidersHorizontal } from 'lucide-vue-next'
-import { computed, onBeforeUnmount, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import AssetGalleryReadOnly from '../components/workspace/AssetGalleryReadOnly.vue'
 import ArtifactEmptyState from '../components/workspace/ArtifactEmptyState.vue'
 import BuildCoworkPanel from '../components/workspace/BuildCoworkPanel.vue'
@@ -26,7 +26,6 @@ import {
   applyControlledChange as applyProjectControlledChange,
   applySpecRevision,
   cancelChange as cancelProjectChange,
-  clearJob,
   confirmSpecAndStartBuild,
   createProject,
   getActiveProject,
@@ -35,10 +34,14 @@ import {
   requestSpecRevision,
   retryBuild,
   retryScopeViolation as retryProjectScopeViolation,
-  scheduleJob,
+  prepareReleaseReview,
+  publishRelease as publishProjectRelease,
+  seedChangeDemo,
+  setWorkspacePhase,
   setDebugFlags,
   startBuildTimeline,
   startGeneration,
+  updateReleaseDraft,
 } from '../stores/projectStore'
 
 const props = withDefaults(defineProps<{ design: ConfirmedGameDesign; initialRelease?: ReleaseRecord | null; resourcePendingCount?: number; relationshipResource?: ResourceCandidate | null }>(), { initialRelease: null, resourcePendingCount: 3, relationshipResource: null })
@@ -68,19 +71,17 @@ const changePlan = computed(() => session.changePlan)
 const versionHistoryOpen = ref(false)
 const releaseReviewOpen = ref(false)
 const releaseDetailOpen = ref(false)
-const releasePhase = ref<ReleasePhase>('review')
-const forcePublishError = new URLSearchParams(window.location.search).get('publishError') === '1'
+const releasePhase = computed(() => session.releasePhase)
 const divergedReleaseDemo = new URLSearchParams(window.location.search).get('diverged') === '1'
-const hasUsedPublishError = ref(false)
 const resourceBridgeAcknowledged = ref(false)
 const playableVersion = ref(divergedReleaseDemo ? 3 : startInPublish ? 2 : 1)
-const currentRelease = ref<ReleaseRecord | null>(props.initialRelease ?? (divergedReleaseDemo ? {
+const currentRelease = computed<ReleaseRecord | null>(() => session.releases.at(-1) ?? props.initialRelease ?? (divergedReleaseDemo ? {
   id: 'release-v1', version: 1, name: '多代田园物语 · First Release',
   description: '完成核心经营、NPC 关系与代际传承体验的第一个正式版本。',
   basedOnPlayable: 2, basedOnGameDesign: 2, basedOnGameSpec: 2,
   status: 'published', createdAt: '上一正式里程碑',
 } : null))
-const releaseDraft = reactive<ReleaseDraft>(createReleaseDraft())
+const releaseDraft = session.releaseDraft
 
 function createReleaseDraft(): ReleaseDraft {
   const nextVersion = (currentRelease.value?.version ?? 0) + 1
@@ -245,13 +246,13 @@ function retryScopeViolation() {
 
 function openVersionHistory() {
   if (phase.value !== 'playable_v2_ready' && phase.value !== 'version_history') return
-  session.phase = 'version_history'
+    setWorkspacePhase(session.id, 'version_history')
   versionHistoryOpen.value = true
 }
 
 function closeVersionHistory() {
   versionHistoryOpen.value = false
-  if (phase.value === 'version_history') session.phase = 'playable_v2_ready'
+  if (phase.value === 'version_history') setWorkspacePhase(session.id, 'playable_v2_ready')
 }
 
 function openReleaseReview() {
@@ -260,27 +261,13 @@ function openReleaseReview() {
   versionHistoryOpen.value = false
   releaseDetailOpen.value = false
   resetReleaseDraft()
-  releasePhase.value = 'review'
+  prepareReleaseReview(session.id)
   releaseReviewOpen.value = true
 }
 
 function publishRelease() {
   if (releasePhase.value !== 'review' && releasePhase.value !== 'error') return
-  releasePhase.value = 'publishing'
-  scheduleJob(session.id, 'publish', () => {
-    if (forcePublishError && !hasUsedPublishError.value) {
-      hasUsedPublishError.value = true
-      releasePhase.value = 'error'
-      return
-    }
-    currentRelease.value = {
-      ...releaseDraft,
-      id: `release-v${releaseDraft.version}`,
-      status: 'published',
-      createdAt: '刚刚',
-    }
-    releasePhase.value = 'success'
-  }, 900)
+  publishProjectRelease(session.id)
 }
 
 function closeReleaseReview() {
@@ -309,11 +296,10 @@ function reviewResources() {
   emit('reviewResources', currentRelease.value)
 }
 
-setDebugFlags({ specError: forceGenerationError, buildError: forceBuildError, scopeError: forceScopeError })
+setDebugFlags({ specError: forceGenerationError, buildError: forceBuildError, scopeError: forceScopeError, publishError: new URLSearchParams(window.location.search).get('publishError') === '1' })
 
 if (startInPublish || startInChange) {
-  requestProjectChange(session.id, 'suggested_next_step')
-  session.phase = startInPublish ? 'playable_v2_ready' : 'showing_recommendations'
+  seedChangeDemo(session.id, startInPublish ? 'playable_v2_ready' : 'showing_recommendations')
 } else if (startInBuild) startBuildTimeline(session.id)
 else if (session.phase === 'generating' && session.messages.length === 0) startGeneration(session.id)
 onBeforeUnmount(() => {
@@ -337,8 +323,8 @@ onBeforeUnmount(() => {
       :plan="changePlan"
       @select="selectDirection"
       @submit="requestChange('natural_language', $event)"
-      @continue-playing="phase = 'playing_v1'"
-      @show-recommendations="phase = 'showing_recommendations'"
+          @continue-playing="setWorkspacePhase(session.id, 'playing_v1')"
+          @show-recommendations="setWorkspacePhase(session.id, 'showing_recommendations')"
     />
     <BuildCoworkPanel v-else-if="isBuildMode" :phase="phase as BuildPhase" />
     <CoworkPanel
@@ -432,7 +418,7 @@ onBeforeUnmount(() => {
 
       <footer v-if="activeTab === 'gamespec' && phase === 'confirming'" class="gamespec-confirm-bar">
         <div><strong>确认 GameSpec？</strong><span>AI 将按照当前 First Playable Scope 开始构建，后续仍可以通过新版本继续修改。</span></div>
-        <button type="button" @click="phase = 'review'">返回检查</button>
+        <button type="button" @click="setWorkspacePhase(session.id, 'review')">返回检查</button>
         <button class="confirm-build" type="button" @click="confirmGameSpec">确认并开始构建 <ArrowRight :size="16" /></button>
       </footer>
     </main>
@@ -448,8 +434,8 @@ onBeforeUnmount(() => {
       @view-release="viewRelease"
       @continue-development="continueDevelopment"
       @review-resources="reviewResources"
-      @update-name="releaseDraft.name = $event"
-      @update-description="releaseDraft.description = $event"
+      @update-name="updateReleaseDraft(session.id, { name: $event })"
+      @update-description="updateReleaseDraft(session.id, { description: $event })"
     />
     <ReleaseDetailDrawer :open="releaseDetailOpen" :release="currentRelease" @close="releaseDetailOpen = false" @play="releaseDetailOpen = false" />
     <ResourceReuseDrawer v-if="relationshipResource" :open="reuseDrawerOpen" :resource="relationshipResource" :used="reuseState === 'used'" @close="reuseDrawerOpen = false" @use="useRelationshipResource" />
