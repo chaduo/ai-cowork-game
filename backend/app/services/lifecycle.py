@@ -1,10 +1,10 @@
 from enum import StrEnum
 import json
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.models import GameDesign, GameSpecRevision, Project, utc_now
+from app.models import Build, BuildCandidate, GameDesign, GameSpecRevision, PlayableVersion, Project, Release, utc_now
 
 
 class ProjectStage(StrEnum):
@@ -93,11 +93,25 @@ class ProjectLifecycleService:
             return ProjectStage.ARCHIVED
         if project.active_build_id:
             return ProjectStage.BUILDING
+        if project.current_playable_version_id:
+            published = self.session.scalar(
+                select(Release).where(Release.playable_version_id == project.current_playable_version_id)
+            )
+            if published:
+                return ProjectStage.PUBLISHED
+            return ProjectStage.PLAYABLE
         revision = self.session.scalar(
             select(GameSpecRevision)
             .where(GameSpecRevision.project_id == project.id)
             .order_by(GameSpecRevision.revision_number.desc())
         )
+        candidate = self.session.scalar(
+            select(BuildCandidate)
+            .where(BuildCandidate.project_id == project.id, BuildCandidate.status == "succeeded")
+            .order_by(BuildCandidate.created_at.desc())
+        )
+        if candidate:
+            return ProjectStage.CANDIDATE_REVIEW
         if revision and revision.status == "confirmed":
             return ProjectStage.READY_TO_BUILD
         if revision:
@@ -106,6 +120,172 @@ class ProjectLifecycleService:
         if design and design.status in {"submitted", "rejected"}:
             return ProjectStage.DESIGN_REVIEW
         return ProjectStage.DESIGN_DRAFT
+
+    def promote_candidate(
+        self,
+        candidate_id: str,
+        *,
+        test_report_id: str,
+        verdict: str,
+        git_commit: str,
+        artifact_checksum: str,
+    ) -> PlayableVersion:
+        candidate = self.session.get(BuildCandidate, candidate_id)
+        if candidate is None:
+            raise ValueError("candidate not found")
+        if candidate.status == "promoted":
+            return self.session.scalar(select(PlayableVersion).where(PlayableVersion.candidate_id == candidate.id))
+        if candidate.status != "succeeded":
+            raise ValueError("only a succeeded candidate can be promoted")
+        if verdict != "pass":
+            raise ValueError("promotion requires a passing test report")
+        project = self._project(candidate.project_id)
+        latest_number = self.session.scalar(
+            select(PlayableVersion.number)
+            .where(PlayableVersion.project_id == project.id)
+            .order_by(PlayableVersion.number.desc())
+        ) or 0
+        version = PlayableVersion(
+            project_id=project.id,
+            candidate_id=candidate.id,
+            number=latest_number + 1,
+            parent_version_id=project.current_playable_version_id,
+            test_report_id=test_report_id,
+            git_commit=git_commit,
+            artifact_path=candidate.artifact_path or "",
+            artifact_checksum=artifact_checksum,
+        )
+        self.session.add(version)
+        self.session.flush()
+        candidate.status = "promoted"
+        project.current_playable_version_id = version.id
+        self.session.flush()
+        return version
+
+    def publish_version(self, version_id: str) -> Release:
+        version = self.session.get(PlayableVersion, version_id)
+        if version is None:
+            raise ValueError("playable version not found")
+        existing = self.session.scalar(select(Release).where(Release.playable_version_id == version.id))
+        if existing:
+            return existing
+        project = self._project(version.project_id)
+        if project.current_playable_version_id != version.id:
+            raise ValueError("only the current playable version can be published")
+        latest_number = self.session.scalar(
+            select(Release.number)
+            .where(Release.project_id == project.id)
+            .order_by(Release.number.desc())
+        ) or 0
+        release = Release(project_id=project.id, playable_version_id=version.id, number=latest_number + 1)
+        self.session.add(release)
+        self.session.flush()
+        return release
+
+    def recover_orphaned_builds(self) -> int:
+        builds = list(self.session.scalars(select(Build).where(Build.status.in_(("pending", "running", "cancelling")))))
+        recovered = 0
+        for build in builds:
+            build.status = "orphaned"
+            build.failure_code = "backend_restart"
+            build.failure_message = "Build interrupted by backend restart"
+            build.ended_at = utc_now()
+            project = self._project(build.project_id)
+            if project.active_build_id == build.id:
+                project.active_build_id = None
+            recovered += 1
+        self.session.flush()
+        return recovered
+
+    def start_build(self, project_id: str, revision_id: str | None = None) -> Build:
+        project = self._project(project_id)
+        if project.archived_at:
+            raise ValueError("archived project cannot start a build")
+        if project.active_build_id:
+            raise ValueError("active build already exists")
+        revision = self.session.get(GameSpecRevision, revision_id) if revision_id else self.session.scalar(
+            select(GameSpecRevision).where(
+                GameSpecRevision.project_id == project_id,
+                GameSpecRevision.status == "confirmed",
+            ).order_by(GameSpecRevision.revision_number.desc())
+        )
+        if revision is None or revision.project_id != project_id or revision.status != "confirmed":
+            raise ValueError("build requires a confirmed gamespec revision")
+        build = Build(project_id=project_id, gamespec_revision_id=revision.id, status="running", started_at=utc_now())
+        self.session.add(build)
+        self.session.flush()
+        project.active_build_id = build.id
+        self.session.flush()
+        return build
+
+    def finish_build(
+        self,
+        build_id: str,
+        status: str,
+        *,
+        summary: str,
+        artifact_path: str | None = None,
+        failure_code: str | None = None,
+    ) -> BuildCandidate:
+        if status not in {"succeeded", "failed", "cancelled"}:
+            raise ValueError("invalid terminal build status")
+        build = self.session.get(Build, build_id)
+        if build is None:
+            raise ValueError("build not found")
+        existing = self.session.scalar(select(BuildCandidate).where(BuildCandidate.build_id == build.id))
+        if existing:
+            if build.status != status:
+                raise ValueError("build already finished with a different status")
+            return existing
+        if build.status not in {"running", "pending", "cancelling"}:
+            raise ValueError("build is not active")
+        build.status = status
+        build.ended_at = utc_now()
+        build.failure_code = failure_code
+        project = self._project(build.project_id)
+        if project.active_build_id == build.id:
+            project.active_build_id = None
+        candidate = BuildCandidate(
+            project_id=build.project_id,
+            build_id=build.id,
+            status=status,
+            summary=summary,
+            artifact_path=artifact_path,
+        )
+        self.session.add(candidate)
+        self.session.flush()
+        return candidate
+
+    def cancel_build(self, build_id: str, *, summary: str = "Build cancelled") -> BuildCandidate:
+        return self.finish_build(build_id, "cancelled", summary=summary, failure_code="cancelled")
+
+    def retry_build(self, build_id: str) -> Build:
+        prior = self.session.get(Build, build_id)
+        if prior is None:
+            raise ValueError("build not found")
+        if prior.status not in {"failed", "cancelled", "orphaned"}:
+            raise ValueError("only a terminal failed build can be retried")
+        project = self._project(prior.project_id)
+        if project.active_build_id:
+            raise ValueError("active build already exists")
+        attempt = (self.session.scalar(
+            select(Build.attempt)
+            .where(Build.project_id == project.id)
+            .order_by(Build.attempt.desc())
+        ) or 0) + 1
+        retry = Build(
+            project_id=project.id,
+            gamespec_revision_id=prior.gamespec_revision_id,
+            parent_build_id=prior.id,
+            attempt=attempt,
+            status="running",
+            started_at=utc_now(),
+        )
+        self.session.add(retry)
+        self.session.flush()
+        project.active_build_id = retry.id
+        self.session.flush()
+        return retry
 
     def _project(self, project_id: str) -> Project:
         project = self.session.get(Project, project_id)
