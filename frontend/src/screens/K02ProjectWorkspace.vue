@@ -271,8 +271,6 @@ function restoreVersion(version: number) {
 }
 
 refreshResourceMatches(session.id)
-
-if (session.phase === 'generating' && session.messages.length === 0) startGeneration(session.id)
 onBeforeUnmount(() => {
   if (reuseFeedbackTimer !== null) window.clearTimeout(reuseFeedbackTimer)
 })

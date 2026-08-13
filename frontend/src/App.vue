@@ -6,7 +6,7 @@ import MyResources from './screens/MyResources.vue'
 import ResourceReviewWorkspace from './screens/ResourceReviewWorkspace.vue'
 import type { ConfirmedGameDesign } from './components/kickoff/kickoffTypes'
 import type { ReleaseRecord } from './components/workspace/releaseTypes'
-import { configureDemoRuntime, createProject, getActiveProject, getPendingResourceCount, openProject, projectStore, updateSavedResourceMetadata } from './stores/projectStore'
+import { configureDemoRuntime, createProject, getActiveProject, getPendingResourceCount, openProject, projectStore, startGeneration, updateSavedResourceMetadata } from './stores/projectStore'
 import { seedDemo, type AppSurface } from './stores/demoSeeds'
 
 function parseDemoFlags(search: string) {
@@ -46,7 +46,8 @@ function updateSavedMetadata(payload: { id: string; name: string; summary: strin
 }
 
 function enterWorkspace(design: ConfirmedGameDesign) {
-  createProject(design)
+  const session = createProject(design)
+  startGeneration(session.id)
   surface.value = 'workspace'
 }
 
