@@ -4,6 +4,13 @@ export interface HealthResponse {
   version: string
 }
 
+export interface ProjectResponse {
+  id: string
+  name: string
+  original_idea: string
+  stage: string
+}
+
 export interface ApiErrorBody {
   error: {
     code: string
@@ -40,4 +47,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function getHealth(): Promise<HealthResponse> {
   return request<HealthResponse>('/healthz')
+}
+
+export function createProjectRecord(input: { name: string; originalIdea: string }, idempotencyKey: string): Promise<ProjectResponse> {
+  return request<ProjectResponse>('/v1/projects', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify({ name: input.name, original_idea: input.originalIdea }),
+  })
+}
+
+export function getProjectRecord(projectId: string): Promise<ProjectResponse> {
+  return request<ProjectResponse>(`/v1/projects/${encodeURIComponent(projectId)}`)
+}
+
+export function listProjectRecords(): Promise<ProjectResponse[]> {
+  return request<ProjectResponse[]>('/v1/projects')
 }

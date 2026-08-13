@@ -23,6 +23,7 @@ class Project(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     name: Mapped[str] = mapped_column(String(80), nullable=False)
     original_idea: Mapped[str] = mapped_column(Text, nullable=False)
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True, unique=True)
     current_playable_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     active_build_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

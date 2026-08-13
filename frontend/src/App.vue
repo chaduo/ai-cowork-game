@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import K01CreateProject from './screens/K01CreateProject.vue'
 import K02ProjectWorkspace from './screens/K02ProjectWorkspace.vue'
 import MyResources from './screens/MyResources.vue'
@@ -8,6 +8,7 @@ import type { ConfirmedGameDesign } from './components/kickoff/kickoffTypes'
 import type { ReleaseRecord } from './components/workspace/releaseTypes'
 import { configureDemoRuntime, createProject, getActiveProject, getPendingResourceCount, openProject, projectStore, startGeneration, updateSavedResourceMetadata } from './stores/projectStore'
 import { seedDemo, type AppSurface } from './stores/demoSeeds'
+import { listProjectRecords } from './api/client'
 
 function parseDemoFlags(search: string) {
   const params = new URLSearchParams(search)
@@ -32,6 +33,31 @@ const reviewedRelease = ref<ReleaseRecord | null>(initialSurface === 'review' ? 
 const activeProject = computed(() => getActiveProject())
 const pendingResourceCount = computed(() => activeProject.value ? getPendingResourceCount(activeProject.value) : 0)
 
+onMounted(async () => {
+  if (requestedScreen || projectStore.projects.length > 0) return
+  try {
+    const records = await listProjectRecords()
+    for (const record of records) {
+      if (projectStore.projects.some((project) => project.id === record.id)) continue
+      createProject({
+        originalIdea: record.original_idea,
+        projectTitle: record.name,
+        scenarioId: 'generic',
+        summary: {
+          title: record.name,
+          summary: record.original_idea,
+          highlights: [],
+          coreLoop: [],
+        },
+        decisions: [],
+      }, record.id)
+    }
+    projectStore.activeProjectId = null
+  } catch {
+    // The prototype remains usable with local state when the API is offline.
+  }
+})
+
 function openResourceReview(release: ReleaseRecord) {
   reviewedRelease.value = release
   surface.value = 'review'
@@ -45,8 +71,8 @@ function updateSavedMetadata(payload: { id: string; name: string; summary: strin
   updateSavedResourceMetadata(payload.id, payload)
 }
 
-function enterWorkspace(design: ConfirmedGameDesign) {
-  const session = createProject(design)
+function enterWorkspace(design: ConfirmedGameDesign, projectId: string) {
+  const session = createProject(design, projectId)
   startGeneration(session.id)
   surface.value = 'workspace'
 }

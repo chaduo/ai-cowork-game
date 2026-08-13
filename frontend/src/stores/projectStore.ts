@@ -296,11 +296,11 @@ export function touchProject(session: ProjectSession): void {
   session.updatedAt = Date.now()
 }
 
-export function createProjectSession(design: ConfirmedGameDesign): ProjectSession {
+export function createProjectSession(design: ConfirmedGameDesign, projectId?: string): ProjectSession {
   projectCounter += 1
   const now = Date.now()
   return {
-    id: `project-${now}-${projectCounter}`,
+    id: projectId ?? `project-${now}-${projectCounter}`,
     createdAt: now,
     updatedAt: now,
     design,
@@ -335,8 +335,8 @@ export function createProjectSession(design: ConfirmedGameDesign): ProjectSessio
   }
 }
 
-export function createProject(design: ConfirmedGameDesign): ProjectSession {
-  const session = createProjectSession(design)
+export function createProject(design: ConfirmedGameDesign, projectId?: string): ProjectSession {
+  const session = createProjectSession(design, projectId)
   projectStore.projects.push(session)
   projectStore.activeProjectId = session.id
   return session

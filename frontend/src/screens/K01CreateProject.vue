@@ -13,9 +13,10 @@ import CreativeKickoffModal from '../components/kickoff/CreativeKickoffModal.vue
 import type { ConfirmedGameDesign } from '../components/kickoff/kickoffTypes'
 import type { ProjectSession } from '../stores/projectStore'
 import { runtimeConfig } from '../stores/projectStore'
+import { ApiClientError, createProjectRecord } from '../api/client'
 
 const props = defineProps<{ projects: ProjectSession[] }>()
-const emit = defineEmits<{ enterWorkspace: [design: ConfirmedGameDesign]; openProject: [projectId: string]; resources: [] }>()
+const emit = defineEmits<{ enterWorkspace: [design: ConfirmedGameDesign, projectId: string]; openProject: [projectId: string]; resources: [] }>()
 
 type GameTemplate = {
   id: string
@@ -73,6 +74,8 @@ const templateFlash = ref(false)
 const kickoffStarted = ref(false)
 const kickoffOpen = ref(false)
 const kickoffIdea = ref('')
+const backendProjectId = ref<string | null>(null)
+const idempotencyKey = ref<string | null>(null)
 const creatorRef = ref<HTMLElement | null>(null)
 const templateSectionRef = ref<HTMLElement | null>(null)
 const ideaInputRef = ref<HTMLTextAreaElement | null>(null)
@@ -133,10 +136,20 @@ async function createProject() {
   if (kickoffStarted.value && nextIdea !== kickoffIdea.value) {
     kickoffOpen.value = false
     kickoffStarted.value = false
+    backendProjectId.value = null
+    idempotencyKey.value = null
     await nextTick()
   }
   if (!kickoffStarted.value) {
     kickoffIdea.value = nextIdea
+    idempotencyKey.value = crypto.randomUUID()
+    try {
+      const created = await createProjectRecord({ name: nextIdea.slice(0, 80), originalIdea: nextIdea }, idempotencyKey.value)
+      backendProjectId.value = created.id
+    } catch (cause) {
+      error.value = cause instanceof ApiClientError ? cause.message : '暂时无法保存这个想法，请确认后端已启动。'
+      return
+    }
     kickoffStarted.value = true
   }
   kickoffOpen.value = true
@@ -149,7 +162,8 @@ async function closeKickoff() {
 }
 
 function enterWorkspace(design: ConfirmedGameDesign) {
-  window.setTimeout(() => emit('enterWorkspace', design), 900)
+  if (!backendProjectId.value) return
+  window.setTimeout(() => emit('enterWorkspace', design, backendProjectId.value!), 900)
 }
 
 function onIdeaKeydown(event: KeyboardEvent) {
