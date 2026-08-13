@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ArrowLeft, ArrowRight, Check, ChevronRight, FileCode2, Gamepad2, Hammer, Image, LoaderCircle, MonitorPlay, ScrollText, SlidersHorizontal } from 'lucide-vue-next'
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import AssetGalleryReadOnly from '../components/workspace/AssetGalleryReadOnly.vue'
 import ArtifactEmptyState from '../components/workspace/ArtifactEmptyState.vue'
 import BuildCoworkPanel from '../components/workspace/BuildCoworkPanel.vue'
@@ -54,7 +54,8 @@ const emit = defineEmits<{ back: []; resources: []; reviewResources: [release: R
 
 const session = getActiveProject()!
 const phase = computed(() => session.phase)
-const activeTab = ref<ArtifactTab>(session.phase.includes('build') ? 'build' : session.phase.includes('change') || session.phase === 'playable_v2_ready' ? 'preview' : 'gamespec')
+const previewPhases: string[] = ['playable_ready', 'showing_recommendations', 'playing_v1', 'playable_v2_ready', 'version_history']
+const activeTab = ref<ArtifactTab>(session.phase.includes('build') ? 'build' : previewPhases.includes(session.phase) || session.phase.includes('change') ? 'preview' : 'gamespec')
 const selectedContext = ref<SpecContext | null>(null)
 const spec = session.spec
 const reuseDrawerOpen = ref(false)
@@ -137,6 +138,10 @@ const generationSteps = computed(() => [
   { label: 'Defining first playable scope', state: phase.value === 'generating' ? 'active' : phase.value === 'generation_error' ? 'failed' : 'done' },
   { label: 'Preparing validation criteria', state: phase.value === 'review' ? 'done' : 'upcoming' },
 ])
+
+watch(phase, (nextPhase) => {
+  if (previewPhases.includes(nextPhase) || nextPhase === 'scope_violation') activeTab.value = 'preview'
+})
 
 function useRelationshipResource() {
   if (!relationshipResource.value) return
