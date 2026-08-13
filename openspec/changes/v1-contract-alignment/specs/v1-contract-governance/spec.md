@@ -86,4 +86,3 @@ Each legacy contract or planning artifact SHALL have one keep, update, replace o
 
 - **WHEN** a downstream Change begins implementation
 - **THEN** its brief and OpenSpec artifacts identify the matrix row and canonical contract it consumes, and do not introduce a second conflicting definition.
-

@@ -183,4 +183,3 @@ Agent/provider-native events as lifecycle mutations
 - [ ] `rg` finds no duplicate canonical names with conflicting definitions across the approved artifacts.
 - [ ] zhang reviews C00 artifacts and confirms the C08 boundary is not overwritten.
 - [ ] The final PR contains only C00 planning/contract changes and documentation; no business implementation files.
-
