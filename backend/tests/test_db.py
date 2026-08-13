@@ -2,6 +2,7 @@ from pathlib import Path
 
 from app.config import Settings
 from app.db import create_engine_for
+from sqlalchemy import inspect
 
 
 def test_sqlite_engine_can_open_configured_database(tmp_path: Path) -> None:
@@ -13,3 +14,7 @@ def test_sqlite_engine_can_open_configured_database(tmp_path: Path) -> None:
 
     engine.dispose()
     assert value == 1
+
+
+def test_isolated_database_fixture_has_no_shared_tables(isolated_database) -> None:
+    assert inspect(isolated_database).get_table_names() == ["alembic_version"]
