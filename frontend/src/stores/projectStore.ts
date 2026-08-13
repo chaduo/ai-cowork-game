@@ -509,6 +509,7 @@ export function applySpecRevision(projectId: string): void {
   spec.draftLabel = 'Draft updated · v1'
   session.messages.push({ id: `applied-${Date.now()}`, role: 'system', text: `${context.label} 已更新到 GameSpec v1 Draft。` })
   session.pendingContext = null
+  refreshResourceMatches(projectId)
   touchProject(session)
 }
 
