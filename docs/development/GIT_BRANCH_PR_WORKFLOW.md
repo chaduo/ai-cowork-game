@@ -28,6 +28,15 @@ feature/*
 
 > `main` 永远保持可运行、可演示。
 
+工作目录规则：
+
+```text
+主目录（main）
+  └── .worktrees/<change-name>/（对应 feature/fix branch）
+```
+
+主目录只负责同步和合并；每个 Change 在自己的 Git worktree 中实现、测试和提交。`.worktrees/` 已被 `.gitignore` 忽略，不进入 PR。
+
 ---
 
 # 2. Change 与 Branch 的关系
@@ -93,10 +102,10 @@ kebab-case
 不要按人名：
 
 ```text
-matthew
-matthew-dev
-teammate
-zhaozhuo
+zhao
+zhang
+zhao-dev
+zhang-dev
 ```
 
 不要用无语义名字：
@@ -123,35 +132,40 @@ Branch 表达的是：
 
 # 5. 开始一个 Change
 
-先同步：
+先在主目录同步：
 
 ```bash
+cd /Users/zhaozhuo/workspace/explore/ai-cowork-game
 git switch main
-git pull
+git pull --ff-only
+git fetch origin
 ```
 
-确认 main 最新后：
+确认 `main` 最新后，创建隔离 worktree 和 branch：
 
 ```bash
-git switch -c feature/<change-name>
+git worktree add .worktrees/<change-name> -b feature/<change-name> origin/main
+cd .worktrees/<change-name>
+git submodule update --init --recursive
 ```
 
 例如：
 
 ```bash
-git switch -c feature/build-job-orchestration
+git worktree add .worktrees/build-job-orchestration -b feature/build-job-orchestration origin/main
+cd .worktrees/build-job-orchestration
 ```
 
 ---
 
 # 6. OpenSpec 与 Branch
 
-推荐顺序：
+推荐顺序（全部在对应 worktree 中执行）：
 
 ```text
 Select Change
 ↓
-Create feature branch
+Create worktree + feature branch
 ↓
 Write Change Brief
 ↓
@@ -454,18 +468,23 @@ main
 
 # 15. Merge 后
 
-同步：
+先回到主目录同步：
 
 ```bash
+cd /Users/zhaozhuo/workspace/explore/ai-cowork-game
 git switch main
-git pull
+git pull --ff-only
 ```
 
-删除本地分支：
+清理已合并的 worktree 和本地分支：
 
 ```bash
+git worktree remove .worktrees/<change-name>
+git worktree prune
 git branch -d feature/<change-name>
 ```
+
+如果 worktree 仍有未提交改动，先处理改动再删除；禁止用 `git worktree remove --force` 掩盖未完成工作。
 
 删除远程分支可在 PR Merge 时由 GitHub 自动完成。
 
@@ -484,11 +503,11 @@ git branch -d feature/<change-name>
 允许：
 
 ```text
-Matthew:
-feature/build-job-orchestration
+zhao:
+.worktrees/build-job-orchestration
 
-Teammate:
-feature/opengame-process-executor
+zhang:
+.worktrees/opengame-process-executor
 ```
 
 前提：
@@ -496,6 +515,7 @@ feature/opengame-process-executor
 - 两个 Change 边界独立
 - Contract 已冻结
 - 依赖关系允许并行
+- 每个 Change 使用不同 worktree，不能共享同一工作目录
 
 如果两人都需要修改同一个核心 Contract：
 

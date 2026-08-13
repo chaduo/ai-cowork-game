@@ -28,6 +28,7 @@
 ### 09:30 开工（20 分钟）
 
 - [ ] 两人从同一个最新 `main` 开始，工作区无误提交的生成文件或 secret。
+- [ ] 主目录只用于同步、查看状态和合并后检查；实现放在 `.worktrees/<change-name>/`。
 - [ ] 打开倒排计划中“今天”的章节，写下 zhao、zhang 各自的 Change 和日终 Gate。
 - [ ] 对照 Catalog 确认每个 Change 的依赖已经完成。
 - [ ] 明确每个 Change 的 Owner、Required Reviewer、branch 和文件所有权。
@@ -38,6 +39,7 @@
 ### 09:50 开始实现
 
 - [ ] 一个 Change 一个 branch、一个 Owner、一个 PR。
+- [ ] 一个 Change 一个 worktree；worktree 目录名与 branch 的 Change 名一致。
 - [ ] 开工前读完 Change Brief 和 OpenSpec artifacts。
 - [ ] 先写失败测试或可重复的失败验证，再写最小实现。
 - [ ] 业务生命周期修改只通过后端 service/action；Vue 只保留纯 UI 状态。
@@ -59,6 +61,7 @@
 - [ ] 失败路径不会覆盖当前 Playable、Release 或 SavedResource。
 - [ ] 真实命令、API 响应、数据库记录、artifact 或浏览器截图有可追溯 evidence。
 - [ ] 更新 Change 状态和日终记录，写明明天第一个动作。
+- [ ] 已合并的 Change 已删除对应 worktree；未合并的 worktree 写入日终记录和保留原因。
 
 Gate 未通过时，19:30-21:30 只追回当天 Gate；禁止借加时提前做明日功能。
 
@@ -105,10 +108,43 @@ Stop-the-line blocker：无 / ...
 ```bash
 git switch main
 git pull --ff-only
-git switch -c feature/cxx-change-name
+git worktree add .worktrees/cxx-change-name -b feature/cxx-change-name origin/main
+cd .worktrees/cxx-change-name
 ```
 
-紧急修复使用 `fix/cxx-description`。不直接改 `main`，不在一个 branch 混入多个 Change。
+如果远端没有最新 `origin/main`，先在主目录运行：
+
+```bash
+git fetch origin
+```
+
+紧急修复使用 `fix/cxx-description`，例如：
+
+```bash
+git worktree add .worktrees/fix-build-preview -b fix/build-preview origin/main
+```
+
+不直接改 `main`，不在一个 branch 混入多个 Change，也不要在两个 worktree 中同时签出同一个 branch。
+
+worktree 的固定规则：
+
+- 主目录保持在 `main`，只做 `fetch/pull`、查看状态和合并后清理。
+- 实现、测试、OpenSpec artifacts 和 commit 都在对应的 `.worktrees/<change-name>/` 中完成。
+- 第一次进入新的 worktree，先执行 `git submodule update --init --recursive`；前端依赖按项目要求执行 `npm ci`。
+- `.worktrees/` 是本机目录，已经写入 `.gitignore`，不提交其中任何文件。
+
+结束一个已合并 Change：
+
+```bash
+cd /Users/zhaozhuo/workspace/explore/ai-cowork-game
+git switch main
+git pull --ff-only
+git worktree remove .worktrees/cxx-change-name
+git worktree prune
+git branch -d feature/cxx-change-name
+```
+
+如果 worktree 仍有未提交文件，不要使用强制删除；先保存、提交或明确丢弃后再清理。
 
 ### 4.3 Change Brief 与 OpenSpec
 
