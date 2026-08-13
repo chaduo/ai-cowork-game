@@ -798,6 +798,7 @@ Return:
 ### 8.3 Explore 之后
 
 - C00 结论先更新本 Catalog、`openspec/config.yaml` 与相关 baseline artifacts，并由 zhang Required Review。
+- C00 canonical contract、迁移矩阵和旧 baseline 处置记录位于 `openspec/changes/v1-contract-alignment/` 与 `docs/development/V1_CONTRACT_MIGRATION_MATRIX.md`；后续 Change 不得把 legacy baseline 当作第二套事实源。
 - 单个 CXX Explore 清晰后，使用 `docs/development/CHANGE_BRIEF_TEMPLATE.md` 写 Change Brief。
 - 再执行 `/opsx:propose <change-name>`，Human Review 后才进入 Superpowers implementation planning。
 
