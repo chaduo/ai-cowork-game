@@ -23,6 +23,14 @@ export function createResourceCandidates(session: ProjectSession, release: Relea
         { name: '任务奖励', defaultValue: '好感 +5', description: '调整每次完成委托增加的好感。' },
         { name: '关系事件', defaultValue: '开启', description: '允许阈值触发结构化事件。' },
       ], provenance, extractionChecks: checks,
+      matchSignals: { section: 'characters', signals: ['委托', '好感', '关系', 'NPC'] },
+      reuseDefaults: {
+        favorMin: 0,
+        favorMax: 100,
+        thresholds: [30, 50, 80],
+        requestReward: 5,
+        importantEventReward: 10,
+      },
     },
     {
       id: 'favor-hud', name: '好感心形 UI', type: 'ui', status: 'pending', recommendation: 'worth_saving', cardSummary: '关系数值 · 心形进度 · 变化反馈',

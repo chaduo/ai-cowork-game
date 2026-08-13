@@ -17,7 +17,6 @@ import VersionHistoryDrawer from '../components/workspace/VersionHistoryDrawer.v
 import ReleaseDetailDrawer from '../components/workspace/ReleaseDetailDrawer.vue'
 import ReleaseReviewModal from '../components/workspace/ReleaseReviewModal.vue'
 import type { ConfirmedGameDesign } from '../components/kickoff/kickoffTypes'
-import type { ResourceCandidate } from '../components/resources/resourceTypes'
 import type { BuildPhase } from '../components/workspace/buildTypes'
 import type { ChangePhase, ChangeSource } from '../components/workspace/changeTypes'
 import type { ReleaseDraft, ReleasePhase, ReleaseRecord } from '../components/workspace/releaseTypes'
@@ -34,6 +33,8 @@ import {
   requestSpecRevision,
   retryBuild,
   retryScopeViolation as retryProjectScopeViolation,
+  cancelRelationshipResource as cancelProjectRelationshipResource,
+  dismissResourceRecommendation,
   prepareReleaseReview,
   publishRelease as publishProjectRelease,
   createReleaseDraftForProject,
@@ -44,10 +45,13 @@ import {
   setDebugFlags,
   startBuildTimeline,
   startGeneration,
+  refreshResourceMatches,
+  projectStore,
+  useRelationshipResource as useProjectRelationshipResource,
   updateReleaseDraft,
 } from '../stores/projectStore'
 
-const props = withDefaults(defineProps<{ design: ConfirmedGameDesign; initialRelease?: ReleaseRecord | null; resourcePendingCount?: number; relationshipResource?: ResourceCandidate | null }>(), { initialRelease: null, resourcePendingCount: 3, relationshipResource: null })
+const props = withDefaults(defineProps<{ design: ConfirmedGameDesign; initialRelease?: ReleaseRecord | null; resourcePendingCount?: number }>(), { initialRelease: null, resourcePendingCount: 3 })
 const emit = defineEmits<{ back: []; resources: []; reviewResources: [release: ReleaseRecord] }>()
 
 const requestedScreen = new URLSearchParams(window.location.search).get('screen')
@@ -59,13 +63,8 @@ const phase = computed(() => session.phase)
 const activeTab = ref<ArtifactTab>(startInPublish || startInChange ? 'preview' : startInBuild ? 'build' : 'gamespec')
 const selectedContext = ref<SpecContext | null>(null)
 const spec = session.spec
-type ResourceReuseState = 'recommended' | 'dismissed' | 'used'
-type RelationshipDraft = Pick<typeof spec.characters, 'primaryNpcs' | 'relationshipGrowth' | 'favorRules' | 'relationshipEvents' | 'requestRewards'>
-const resourceReuseDemo = requestedScreen === 'resource-reuse'
-const reuseState = ref<ResourceReuseState>(resourceReuseDemo && props.relationshipResource ? 'recommended' : 'dismissed')
 const reuseDrawerOpen = ref(false)
 const reuseFeedback = ref(false)
-const relationshipSnapshot = ref<Readonly<RelationshipDraft> | null>(null)
 let reuseFeedbackTimer: number | null = null
 const forceGenerationError = new URLSearchParams(window.location.search).get('specError') === '1'
 const forceBuildError = new URLSearchParams(window.location.search).get('buildError') === '1'
@@ -96,6 +95,15 @@ function resetReleaseDraft() {
 }
 
 const messages = computed(() => session.messages)
+const relationshipResource = computed(() => {
+  const resourceId = Object.entries(session.matchedResources).find(([, section]) => section === 'characters')?.[0]
+  return resourceId ? projectStore.savedResources.find((resource) => resource.id === resourceId) ?? null : null
+})
+const reuseState = computed<'recommended' | 'dismissed' | 'used'>(() => {
+  const resourceId = relationshipResource.value?.id
+  if (!resourceId || session.reuseSpecVersion !== session.specVersion) return 'dismissed'
+  return session.reuseDecisions[resourceId] ?? 'recommended'
+})
 
 const specTabs = [
   { id: 'gamespec' as const, label: 'GAME SPEC', icon: ScrollText },
@@ -145,28 +153,9 @@ const generationSteps = computed(() => [
   { label: 'Preparing validation criteria', state: phase.value === 'review' ? 'done' : 'upcoming' },
 ])
 
-function cloneRelationshipDraft(): RelationshipDraft {
-  return {
-    primaryNpcs: spec.characters.primaryNpcs,
-    relationshipGrowth: spec.characters.relationshipGrowth,
-    favorRules: spec.characters.favorRules,
-    relationshipEvents: spec.characters.relationshipEvents,
-    requestRewards: spec.characters.requestRewards,
-  }
-}
-
 function useRelationshipResource() {
-  if (!resourceReuseDemo || !props.relationshipResource) return
-  if (relationshipSnapshot.value === null) relationshipSnapshot.value = Object.freeze({ ...cloneRelationshipDraft() })
-  Object.assign(spec.characters, {
-    primaryNpcs: 'Emily · 店员；Alex · 常客。',
-    relationshipGrowth: '完成 NPC 委托或互动后获得好感。',
-    favorRules: '默认范围 0–100；关键关系节点为 30 / 60 / 80。',
-    relationshipEvents: '达到关键关系节点后，可以触发新的角色事件。',
-    requestRewards: '完成普通委托：好感 +5；完成重要事件：好感 +10。',
-  })
-  if (!spec.updatedSections.includes('characters')) spec.updatedSections.push('characters')
-  reuseState.value = 'used'
+  if (!relationshipResource.value) return
+  useProjectRelationshipResource(session.id, relationshipResource.value.id)
   reuseDrawerOpen.value = false
   reuseFeedback.value = true
   if (reuseFeedbackTimer !== null) window.clearTimeout(reuseFeedbackTimer)
@@ -174,14 +163,13 @@ function useRelationshipResource() {
 }
 
 function cancelRelationshipResource() {
-  if (!relationshipSnapshot.value) return
-  Object.assign(spec.characters, { ...relationshipSnapshot.value })
-  reuseState.value = 'recommended'
+  if (!relationshipResource.value) return
+  cancelProjectRelationshipResource(session.id, relationshipResource.value.id)
   reuseFeedback.value = false
 }
 
 function dismissRelationshipResource() {
-  reuseState.value = 'dismissed'
+  if (relationshipResource.value) dismissResourceRecommendation(session.id, relationshipResource.value.id)
 }
 
 function selectContext(context: SpecContext) {
@@ -298,6 +286,7 @@ function restoreVersion(version: number) {
 }
 
 setDebugFlags({ specError: forceGenerationError, buildError: forceBuildError, scopeError: forceScopeError, publishError: new URLSearchParams(window.location.search).get('publishError') === '1' })
+refreshResourceMatches(session.id)
 
 if (startInPublish || startInChange) {
   seedChangeDemo(session.id, startInPublish ? 'playable_v2_ready' : 'showing_recommendations')
@@ -439,6 +428,6 @@ onBeforeUnmount(() => {
       @update-description="updateReleaseDraft(session.id, { description: $event })"
     />
     <ReleaseDetailDrawer :open="releaseDetailOpen" :release="currentRelease" @close="releaseDetailOpen = false" @play="releaseDetailOpen = false" />
-    <ResourceReuseDrawer v-if="relationshipResource" :open="reuseDrawerOpen" :resource="relationshipResource" :used="reuseState === 'used'" @close="reuseDrawerOpen = false" @use="useRelationshipResource" />
+    <ResourceReuseDrawer v-if="relationshipResource" :open="reuseDrawerOpen" :resource="relationshipResource" :used="reuseState === 'used'" :spec="spec" @close="reuseDrawerOpen = false" @use="useRelationshipResource" />
   </div>
 </template>

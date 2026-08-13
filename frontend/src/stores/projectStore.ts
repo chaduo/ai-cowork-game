@@ -6,6 +6,7 @@ import { createChangePlan } from '../components/workspace/changeFixture'
 import type { ChangePhase, ChangePlan, ChangeSource } from '../components/workspace/changeTypes'
 import { createGameSpecFixture } from '../components/workspace/gameSpecFixture'
 import { createResourceCandidates as createResourceCandidatesFixture } from '../components/resources/resourceFixtures'
+import { matchResourcesToSpec } from './resourceMatching'
 import type { ReleaseDraft, ReleasePhase, ReleaseRecord } from '../components/workspace/releaseTypes'
 import type {
   CoworkMessage,
@@ -35,7 +36,7 @@ export type ProjectSession = {
   reuseDecisions: Record<string, 'dismissed' | 'used'>
   reuseSpecVersion: number
   matchedResources: Record<string, SpecContext['key']>
-  relationshipSnapshot: RelationshipDraft | null
+  relationshipSnapshot: Readonly<RelationshipDraft> | null
   resourceBridgeAcknowledged: boolean
   resourceBatches: Record<string, ResourceBatchItem[]>
 }
@@ -94,6 +95,8 @@ function cloneResource(resource: ResourceCandidate): ResourceCandidate {
     removedProjectContent: [...resource.removedProjectContent],
     included: [...resource.included],
     excluded: [...resource.excluded],
+    matchSignals: resource.matchSignals && { ...resource.matchSignals, signals: [...resource.matchSignals.signals] },
+    reuseDefaults: resource.reuseDefaults && { ...resource.reuseDefaults, thresholds: [...resource.reuseDefaults.thresholds] },
   }
 }
 
@@ -123,6 +126,7 @@ export function saveCandidate(projectId: string, releaseId: string, candidateId:
     const saved = cloneResource(completed.candidate)
     if (savedIndex === -1) projectStore.savedResources.push(saved)
     else projectStore.savedResources[savedIndex] = saved
+    refreshAllResourceMatches()
     touchProject(session)
   }, 420)
 }
@@ -143,6 +147,7 @@ export function undoCandidate(projectId: string, releaseId: string, candidateId:
   if (item.state === 'saved') {
     const savedIndex = projectStore.savedResources.findIndex((resource) => resource.id === candidateId)
     if (savedIndex !== -1) projectStore.savedResources.splice(savedIndex, 1)
+    refreshAllResourceMatches()
   }
   item.state = 'pending'
   item.candidate.status = 'pending'
@@ -159,6 +164,65 @@ export function updateSavedResourceMetadata(candidateId: string, patch: Pick<Res
       if (item) Object.assign(item.candidate, patch, { cardSummary: patch.summary })
     }
   }
+}
+
+export function refreshResourceMatches(projectId: string): void {
+  const session = getProject(projectId)
+  if (!session) return
+
+  if (session.reuseSpecVersion !== session.specVersion) {
+    session.reuseDecisions = {}
+    session.relationshipSnapshot = null
+    session.reuseSpecVersion = session.specVersion
+  }
+
+  session.matchedResources = Object.fromEntries(
+    matchResourcesToSpec(session.spec, projectStore.savedResources).map((match) => [match.resourceId, match.section]),
+  )
+  touchProject(session)
+}
+
+function refreshAllResourceMatches(): void {
+  projectStore.projects.forEach((project) => refreshResourceMatches(project.id))
+}
+
+export function dismissResourceRecommendation(projectId: string, resourceId: string): void {
+  const session = getProject(projectId)
+  if (!session || session.reuseSpecVersion !== session.specVersion || !session.matchedResources[resourceId]) return
+  session.reuseDecisions[resourceId] = 'dismissed'
+  touchProject(session)
+}
+
+function relationshipDraft(session: ProjectSession): RelationshipDraft {
+  const { relationshipGrowth, favorRules, relationshipEvents, requestRewards } = session.spec.characters
+  return { relationshipGrowth, favorRules, relationshipEvents, requestRewards }
+}
+
+export function useRelationshipResource(projectId: string, resourceId: string): void {
+  const session = getProject(projectId)
+  const resource = projectStore.savedResources.find((item) => item.id === resourceId)
+  if (!session || !resource || session.reuseSpecVersion !== session.specVersion || session.matchedResources[resourceId] !== 'characters' || !resource.reuseDefaults) return
+
+  if (session.relationshipSnapshot === null) session.relationshipSnapshot = Object.freeze(relationshipDraft(session))
+  const defaults = resource.reuseDefaults
+  const thresholds = defaults.thresholds.join(' / ')
+  Object.assign(session.spec.characters, {
+    relationshipGrowth: `通过 NPC 委托与日常互动积累好感，并逐步推进关系。`,
+    favorRules: `好感范围 ${defaults.favorMin}–${defaults.favorMax}；关系阈值为 ${thresholds}。`,
+    relationshipEvents: `达到 ${thresholds} 好感阈值后触发对应的关系事件。`,
+    requestRewards: `完成普通委托：好感 +${defaults.requestReward}；完成重要事件：好感 +${defaults.importantEventReward}。`,
+  })
+  if (!session.spec.updatedSections.includes('characters')) session.spec.updatedSections.push('characters')
+  session.reuseDecisions[resourceId] = 'used'
+  touchProject(session)
+}
+
+export function cancelRelationshipResource(projectId: string, resourceId: string): void {
+  const session = getProject(projectId)
+  if (!session || session.reuseDecisions[resourceId] !== 'used' || !session.relationshipSnapshot) return
+  Object.assign(session.spec.characters, session.relationshipSnapshot)
+  delete session.reuseDecisions[resourceId]
+  touchProject(session)
 }
 
 export function createPlayableSnapshot(session: ProjectSession): PlayableVersionRecord['snapshot'] {
@@ -366,6 +430,7 @@ export function startGeneration(projectId: string): void {
         ? '第一版 GameSpec 已经整理好了。我保留了咖啡经营和人物关系的核心，并把第一版收敛成可以先完成订单、认识店员与常客的可玩闭环。你可以直接确认，也可以选择任何 Section 让我调整。'
         : '第一版 GameSpec 已经整理好了。我保留了你确认的关系成长核心，同时把完整多代经营收敛成一个可以先做出来试玩的版本。你可以直接确认，也可以选择任何 Section 让我调整。',
     })
+    refreshResourceMatches(projectId)
     touchProject(session)
   }, 1250)
 }
@@ -383,7 +448,7 @@ export function requestSpecRevision(projectId: string, context: SpecContext, tex
       id: `proposal-${Date.now()}`,
       role: 'ai',
       text: context.key === 'characters'
-        ? '可以。我会把 Lucy 的关系行为调整成“陌生 → 熟悉 → 亲近”，并让每个阶段使用不同的对话池。'
+        ? `可以。我会把 ${session.spec.characters.npcName} 的关系行为调整成“陌生 → 熟悉 → 亲近”，并让每个阶段使用不同的对话池。`
         : `可以。我会更新 ${context.label}，同时保持 First Playable 的范围不继续膨胀。`,
       action: 'apply-revision',
     })
@@ -403,7 +468,8 @@ export function applySpecRevision(projectId: string): void {
   if (context.key === 'characters') {
     spec.characters.dialogueStates = ['陌生', '熟悉', '亲近']
     if (!spec.characters.npcBehaviors.includes('按关系阶段切换对话池')) spec.characters.npcBehaviors.push('按关系阶段切换对话池')
-    if (!spec.validation.includes('Lucy 的对话会随关系阶段变化')) spec.validation.push('Lucy 的对话会随关系阶段变化')
+    const relationshipValidation = `${spec.characters.npcName} 的对话会随关系阶段变化`
+    if (!spec.validation.includes(relationshipValidation)) spec.validation.push(relationshipValidation)
   } else if (context.key === 'gameplay' && !spec.gameplay.actions.includes('关系事件选择')) {
     spec.gameplay.actions.push('关系事件选择')
   } else if (context.key === 'scope' && !spec.scope.included.includes('三阶段 NPC 对话')) {

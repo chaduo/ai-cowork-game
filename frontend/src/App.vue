@@ -19,7 +19,6 @@ const reviewedRelease = ref<ReleaseRecord | null>(screen === 'resources' ? resou
 const activeProject = computed(() => getActiveProject())
 const savedResources = computed(() => projectStore.savedResources)
 const pendingResourceCount = computed(() => activeProject.value ? getPendingResourceCount(activeProject.value) : 0)
-const relationshipResource = computed(() => savedResources.value.find((resource) => resource.id === 'relationship-system') ?? null)
 
 function openResourceReview(release: ReleaseRecord) {
   reviewedRelease.value = release
@@ -44,6 +43,6 @@ function enterWorkspace(design: ConfirmedGameDesign) {
   <BuildPlayScreen v-if="screen === 'build-play'" />
   <MyResources v-else-if="surface === 'resources'" :resources="savedResources" @projects="surface = 'projects'" @update-metadata="updateSavedMetadata" />
   <ResourceReviewWorkspace v-else-if="surface === 'review' && reviewedRelease && activeProject" :project-id="activeProject.id" :release="reviewedRelease" @back="closeResourceReview()" @resources="closeResourceReview('resources')" @projects="closeResourceReview('projects')" />
-  <K02ProjectWorkspace v-else-if="surface === 'workspace' && workspaceDesign" :design="workspaceDesign" :initial-release="reviewedRelease" :resource-pending-count="pendingResourceCount" :relationship-resource="relationshipResource" @back="surface = 'projects'" @resources="surface = 'resources'" @review-resources="openResourceReview" />
+  <K02ProjectWorkspace v-else-if="surface === 'workspace' && workspaceDesign" :design="workspaceDesign" :initial-release="reviewedRelease" :resource-pending-count="pendingResourceCount" @back="surface = 'projects'" @resources="surface = 'resources'" @review-resources="openResourceReview" />
   <K01CreateProject v-else @enter-workspace="enterWorkspace" @resources="surface = 'resources'" />
 </template>

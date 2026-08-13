@@ -76,7 +76,7 @@ const characterContext = computed<SpecContext>(() => ({
       @adjust="$emit('adjust', $event)"
     >
       <div v-if="reuseState === 'used' && relationshipResource" class="resource-reuse-status" :class="{ 'is-entering': reuseFeedback }">
-        <Check :size="15" /><span><strong>已使用 {{ relationshipResource.name }}</strong><small>已根据当前咖啡店设计适配</small></span><div></div><button type="button" @click="$emit('viewResource')"><Eye :size="13" />查看资源</button><button type="button" @click="$emit('cancelResource')"><RotateCcw :size="13" />取消使用</button>
+        <Check :size="15" /><span><strong>已使用 {{ relationshipResource.name }}</strong><small>已适配到当前 GameSpec 的关系字段</small></span><div></div><button type="button" @click="$emit('viewResource')"><Eye :size="13" />查看资源</button><button type="button" @click="$emit('cancelResource')"><RotateCcw :size="13" />取消使用</button>
       </div>
       <ResourceReuseRecommendation v-else-if="reuseState === 'recommended' && relationshipResource" :resource="relationshipResource" @view="$emit('viewResource')" @use="$emit('useResource')" @dismiss="$emit('dismissResource')" />
 
