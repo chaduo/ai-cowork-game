@@ -5,6 +5,7 @@ description = "AI Cowork Game platform backend foundation"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115,<1",
+  "alembic>=1.14,<2",
   "sqlalchemy>=2.0,<3",
   "uvicorn[standard]>=0.30,<1",
 ]
