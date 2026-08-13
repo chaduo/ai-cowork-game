@@ -7,6 +7,7 @@ const props = defineProps<{
   phase: ReleasePhase
   draft: ReleaseDraft
   release: ReleaseRecord | null
+  pendingResourceCount?: number
 }>()
 
 const emit = defineEmits<{
@@ -96,10 +97,14 @@ const emit = defineEmits<{
             <button type="button" @click="emit('continueDevelopment')">继续开发</button>
             <button type="button" class="primary" @click="emit('viewRelease')">查看 Release <ArrowRight :size="14" /></button>
           </div>
-          <div class="release-success-resource-bridge">
-            <div><span>可复用资源候选</span><strong>发现 3 个可能值得沉淀的内容</strong><small>1 个玩法模块 · 1 个 UI 模块 · 1 个视觉资产</small><p>这些目前只是候选，不会自动进入正式资源库。</p></div>
+          <div v-if="pendingResourceCount" class="release-success-resource-bridge">
+            <div><span>可复用资源候选</span><strong>发现 {{ pendingResourceCount }} 个可能值得沉淀的内容</strong><small>这些目前只是候选，不会自动进入正式资源库。</small><p>它们不会自动进入正式资源库，是否保存由你决定。</p></div>
             <button type="button" @click="emit('continueDevelopment')">稍后处理</button>
             <button type="button" class="primary" @click="emit('reviewResources')">Review 资源 <ArrowRight :size="14" /></button>
+          </div>
+          <div v-else class="release-success-resource-bridge is-empty">
+            <div><span>可复用资源候选</span><strong>这次发布没有新的待确认资源</strong><p>后续发布仍可以继续沉淀值得复用的创作成果。</p></div>
+            <button type="button" @click="emit('continueDevelopment')">继续开发</button>
           </div>
         </div>
 

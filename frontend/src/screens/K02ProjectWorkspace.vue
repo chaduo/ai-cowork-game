@@ -398,6 +398,7 @@ onBeforeUnmount(() => {
       :phase="releasePhase"
       :draft="releaseDraft"
       :release="currentRelease"
+      :pending-resource-count="resourcePendingCount"
       @close="closeReleaseReview"
       @publish="publishRelease"
       @retry="publishRelease"
