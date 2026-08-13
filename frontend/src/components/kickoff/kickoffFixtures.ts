@@ -113,6 +113,39 @@ const genericFallback: Question = {
   ],
 }
 
+const coffeeScenario: KickoffScenario = {
+  id: 'coffee-shop',
+  title: '咖啡店故事',
+  understanding: '这是一个围绕咖啡店日常、常客故事和关系成长展开的温暖模拟游戏。',
+  coreQuestion: {
+    id: 'coffee-core-experience', response: '我先确认咖啡经营和人物关系谁是玩家每天回来的主要理由。',
+    prompt: '玩家最主要沉浸在哪种体验？', choices: [
+      choice({ id: 'coffee-relationships', number: '01', title: '经营咖啡店并认识常客', description: '接待顾客、完成订单，在日常互动中逐步了解店员与常客。', impact: '经营 · 关系成长', recommended: true, loopLabel: '关系成长' }),
+      choice({ id: 'coffee-business', number: '02', title: '把咖啡店经营得更好', description: '制作饮品、服务顾客并升级店铺设施。', impact: '经营 · 升级', loopLabel: '经营成长' }),
+      choice({ id: 'coffee-story', number: '03', title: '通过小故事认识每个人', description: '用对话和选择推进顾客的日常故事。', impact: '叙事 · 互动', loopLabel: '故事推进' }),
+    ],
+  },
+  followUps: {
+    'coffee-relationships': { id: 'coffee-relationship-mechanic', response: '关系成长会成为经营循环之外的长期回报。', prompt: '关系主要通过什么方式推进？', choices: [
+      choice({ id: 'coffee-requests', number: '01', title: '对话与完成顾客委托', description: '完成 NPC 委托、日常互动和小事件，提升好感并解锁关系事件。', impact: '目标明确 · 容易规划', recommended: true }),
+      choice({ id: 'coffee-routine', number: '02', title: '每天见面与陪伴', description: '通过持续出现和日常对话，让关系自然变化。', impact: '生活感 · 节奏舒展' }),
+      choice({ id: 'coffee-choices', number: '03', title: '关键选择与剧情事件', description: '重要选择改变顾客态度和后续事件。', impact: '叙事更强 · 分支更多' }),
+    ] },
+  },
+  genericFollowUp: { id: 'coffee-generic', response: '我们会保留咖啡经营和关系成长两条线。', prompt: '玩家会通过什么行动推进故事？', choices: [
+    choice({ id: 'coffee-orders', number: '01', title: '完成订单并和 NPC 互动', description: '用每天的订单和互动推进关系。', impact: '反馈清楚' }),
+    choice({ id: 'coffee-upgrades', number: '02', title: '升级店铺和菜单', description: '用经营成果解锁更多内容。', impact: '成长明确' }),
+    choice({ id: 'coffee-events', number: '03', title: '触发关系事件', description: '在条件满足后进入新的角色事件。', impact: '回报具体' }),
+  ] },
+  buildSummary: (idea, decisions) => ({
+    title: '咖啡店故事',
+    summary: `一款围绕咖啡店经营、顾客故事和关系成长展开的温暖模拟游戏。${idea ? '玩家从日常订单和互动中逐步建立重要关系。' : ''}`,
+    highlights: ['咖啡订单与店铺经营', '两位常客或店员 NPC', decisions[1]?.answer ?? '对话与委托推进关系'],
+    coreLoop: ['接待顾客', '制作咖啡', '完成订单', '推进关系'],
+    progression: ['认识常客', '提升好感', '解锁关系事件'],
+  }),
+}
+
 const iterationQuestions: Record<string, Question> = {
   'npc-depth': {
     id: 'iteration-npc-depth',
@@ -231,6 +264,7 @@ export { iterationQuestions }
 export function resolveKickoffScenario(idea: string, templateId?: string | null): KickoffScenario {
   const source = `${templateId ?? ''} ${idea}`.toLowerCase()
   if (/种田|养殖|农场|结婚|传承|多代|农村|田园|farm|relationship/.test(source)) return farmScenario
+  if (/咖啡|咖啡店|常客|coffee|cafe/.test(source)) return coffeeScenario
   return genericScenario
 }
 
