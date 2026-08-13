@@ -60,7 +60,7 @@
 
 - [ ] zhao：确认 `feature/project-lifecycle-store` 已 Review 并合并到 `main`，或明确标记为只读 Prototype reference。
 - [ ] zhang：从同一个最新 `main` 开始 C08，不从独立旧副本或嵌套 test repository 开发产品实现。
-- [ ] 双方：确认 `docs/develop/V1_CHANGE_CATALOG.md` 为 roadmap 输入，C00 完成后 OpenSpec 才成为 contract 事实源。
+- [ ] 双方：确认 `docs/development/V1_CHANGE_CATALOG.md` 为 roadmap 输入，C00 完成后 OpenSpec 才成为 contract 事实源。
 - [ ] 双方：建立共享的 PR/CI 命令清单和本地 secret 配置方式，禁止提交 OpenGame credential。
 
 Gate 失败时，C01-C19 不开工。

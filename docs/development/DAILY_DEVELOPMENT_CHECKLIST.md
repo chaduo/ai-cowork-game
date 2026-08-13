@@ -66,7 +66,7 @@ Gate 未通过时，19:30-21:30 只追回当天 Gate；禁止借加时提前做�
 
 ## 3. 今日工作卡
 
-每天 09:30 把下面内容填入当天 PR、协作文档或 `docs/develop/daily/YYYY-MM-DD.md`：
+每天 09:30 把下面内容填入当天 PR、协作文档或 `docs/development/daily/YYYY-MM-DD.md`：
 
 ```md
 # YYYY-MM-DD

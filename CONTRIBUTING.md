@@ -14,7 +14,7 @@ git submodule update --init --recursive
 git switch -c feature/cxx-change-name
 ```
 
-先阅读 [`docs/develop/V1_CHANGE_CATALOG.md`](docs/develop/V1_CHANGE_CATALOG.md) 和当天的 [`docs/develop/V1_DEMO_IMPLEMENTATION_SCHEDULE_2026-08-20.md`](docs/develop/V1_DEMO_IMPLEMENTATION_SCHEDULE_2026-08-20.md)，再按 [`docs/develop/DAILY_DEVELOPMENT_CHECKLIST.md`](docs/develop/DAILY_DEVELOPMENT_CHECKLIST.md) 开工。
+先阅读 [`docs/development/V1_CHANGE_CATALOG.md`](docs/development/V1_CHANGE_CATALOG.md) 和当天的 [`docs/development/V1_DEMO_IMPLEMENTATION_SCHEDULE_2026-08-20.md`](docs/development/V1_DEMO_IMPLEMENTATION_SCHEDULE_2026-08-20.md)，再按 [`docs/development/DAILY_DEVELOPMENT_CHECKLIST.md`](docs/development/DAILY_DEVELOPMENT_CHECKLIST.md) 开工。
 
 ## 前端验证
 
@@ -46,4 +46,3 @@ PR 标题包含 Change ID，例如：
 ```
 
 PR 说明至少包含：Change/OpenSpec 路径、完成内容、Out of Scope、验收证据、测试命令和 Reviewer 重点。Required Reviewer 批准、验证通过且无冲突后再合并。
-

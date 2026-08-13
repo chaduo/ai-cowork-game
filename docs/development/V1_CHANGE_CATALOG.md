@@ -747,7 +747,7 @@ Backlog → Explore → Proposed → Ready → In Progress → Review → Done
 Explore C00 `v1-contract-alignment`.
 
 Read:
-- docs/develop/V1_CHANGE_CATALOG.md
+- docs/development/V1_CHANGE_CATALOG.md
 - openspec/config.yaml
 - openspec/changes/platform-v1-opengame-baseline/
 - specs/001-game-creation-mvp/contracts/
@@ -777,7 +777,7 @@ Return:
 ```text
 @openspec-explore
 
-Explore CXX `<change-name>` from docs/develop/V1_CHANGE_CATALOG.md.
+Explore CXX `<change-name>` from docs/development/V1_CHANGE_CATALOG.md.
 
 Read the CXX section, completed dependency OpenSpec artifacts, and the current code paths it replaces.
 Use the Catalog as roadmap context; use approved dependency contracts as normative inputs.
@@ -798,7 +798,7 @@ Return:
 ### 8.3 Explore 之后
 
 - C00 结论先更新本 Catalog、`openspec/config.yaml` 与相关 baseline artifacts，并由 zhang Required Review。
-- 单个 CXX Explore 清晰后，使用 `docs/develop/CHANGE_BRIEF_TEMPLATE.md` 写 Change Brief。
+- 单个 CXX Explore 清晰后，使用 `docs/development/CHANGE_BRIEF_TEMPLATE.md` 写 Change Brief。
 - 再执行 `/opsx:propose <change-name>`，Human Review 后才进入 Superpowers implementation planning。
 
 ---

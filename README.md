@@ -44,11 +44,11 @@ git submodule update --init --recursive
 
 ## 文档入口
 
-- [`docs/develop/V1_CHANGE_CATALOG.md`](docs/develop/V1_CHANGE_CATALOG.md)：C00-C19 的范围、依赖和 OpenSpec Explore 输入。
-- [`docs/develop/V1_DEMO_IMPLEMENTATION_SCHEDULE_2026-08-20.md`](docs/develop/V1_DEMO_IMPLEMENTATION_SCHEDULE_2026-08-20.md)：8 月 20 日展示倒排计划。
-- [`docs/develop/DAILY_DEVELOPMENT_CHECKLIST.md`](docs/develop/DAILY_DEVELOPMENT_CHECKLIST.md)：每天开工、验证、Review、合并和日终 Gate。
-- [`docs/develop/GIT_BRANCH_PR_WORKFLOW.md`](docs/develop/GIT_BRANCH_PR_WORKFLOW.md)：branch、PR 和合并约定。
-- [`docs/develop/OPENSPEC_SUPERPOWERS_WORKFLOW.md`](docs/develop/OPENSPEC_SUPERPOWERS_WORKFLOW.md)：OpenSpec 与 Superpowers 的协作方式。
+- [`docs/development/V1_CHANGE_CATALOG.md`](docs/development/V1_CHANGE_CATALOG.md)：C00-C19 的范围、依赖和 OpenSpec Explore 输入。
+- [`docs/development/V1_DEMO_IMPLEMENTATION_SCHEDULE_2026-08-20.md`](docs/development/V1_DEMO_IMPLEMENTATION_SCHEDULE_2026-08-20.md)：8 月 20 日展示倒排计划。
+- [`docs/development/DAILY_DEVELOPMENT_CHECKLIST.md`](docs/development/DAILY_DEVELOPMENT_CHECKLIST.md)：每天开工、验证、Review、合并和日终 Gate。
+- [`docs/development/GIT_BRANCH_PR_WORKFLOW.md`](docs/development/GIT_BRANCH_PR_WORKFLOW.md)：branch、PR 和合并约定。
+- [`docs/development/OPENSPEC_SUPERPOWERS_WORKFLOW.md`](docs/development/OPENSPEC_SUPERPOWERS_WORKFLOW.md)：OpenSpec 与 Superpowers 的协作方式。
 - [`openspec/`](openspec/)：当前 Change 的 proposal、design、spec 和 tasks。
 
 ## 协作原则
@@ -56,4 +56,3 @@ git submodule update --init --recursive
 一个 Change 对应一个 Owner、一个 feature branch 和一个 PR。业务生命周期的状态变更必须经过项目状态层；前端不绕过 Human Gate 推进状态。真实 OpenGame 验收与 Fake contract test 分开记录，不能用 demo fixture 冒充端到端 evidence。
 
 详见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
-
