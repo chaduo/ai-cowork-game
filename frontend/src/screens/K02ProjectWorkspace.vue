@@ -16,14 +16,30 @@ import LifecycleRail from '../components/workspace/LifecycleRail.vue'
 import VersionHistoryDrawer from '../components/workspace/VersionHistoryDrawer.vue'
 import ReleaseDetailDrawer from '../components/workspace/ReleaseDetailDrawer.vue'
 import ReleaseReviewModal from '../components/workspace/ReleaseReviewModal.vue'
-import { createChangePlan } from '../components/workspace/changeFixture'
-import { createGameSpecFixture } from '../components/workspace/gameSpecFixture'
 import type { ConfirmedGameDesign } from '../components/kickoff/kickoffTypes'
 import type { ResourceCandidate } from '../components/resources/resourceTypes'
 import type { BuildPhase } from '../components/workspace/buildTypes'
-import type { ChangePhase, ChangePlan, ChangeSource } from '../components/workspace/changeTypes'
+import type { ChangePhase, ChangeSource } from '../components/workspace/changeTypes'
 import type { ReleaseDraft, ReleasePhase, ReleaseRecord } from '../components/workspace/releaseTypes'
-import type { ArtifactTab, CoworkMessage, SpecContext, WorkspacePhase } from '../components/workspace/workspaceTypes'
+import type { ArtifactTab, SpecContext } from '../components/workspace/workspaceTypes'
+import {
+  applyControlledChange as applyProjectControlledChange,
+  applySpecRevision,
+  cancelChange as cancelProjectChange,
+  clearJob,
+  confirmSpecAndStartBuild,
+  createProject,
+  getActiveProject,
+  requestChange as requestProjectChange,
+  requestSpecConfirmation,
+  requestSpecRevision,
+  retryBuild,
+  retryScopeViolation as retryProjectScopeViolation,
+  scheduleJob,
+  setDebugFlags,
+  startBuildTimeline,
+  startGeneration,
+} from '../stores/projectStore'
 
 const props = withDefaults(defineProps<{ design: ConfirmedGameDesign; initialRelease?: ReleaseRecord | null; resourcePendingCount?: number; relationshipResource?: ResourceCandidate | null }>(), { initialRelease: null, resourcePendingCount: 3, relationshipResource: null })
 const emit = defineEmits<{ back: []; resources: []; reviewResources: [release: ReleaseRecord] }>()
@@ -32,10 +48,11 @@ const requestedScreen = new URLSearchParams(window.location.search).get('screen'
 const startInBuild = requestedScreen === 'build'
 const startInChange = requestedScreen === 'change'
 const startInPublish = requestedScreen === 'publish' || requestedScreen === 'resources'
-const phase = ref<WorkspacePhase>(startInPublish ? 'playable_v2_ready' : startInChange ? 'showing_recommendations' : startInBuild ? 'build_starting' : 'generating')
+const session = getActiveProject() ?? createProject(props.design)
+const phase = computed(() => session.phase)
 const activeTab = ref<ArtifactTab>(startInPublish || startInChange ? 'preview' : startInBuild ? 'build' : 'gamespec')
 const selectedContext = ref<SpecContext | null>(null)
-const spec = reactive(createGameSpecFixture(props.design))
+const spec = session.spec
 type ResourceReuseState = 'recommended' | 'dismissed' | 'used'
 type RelationshipDraft = Pick<typeof spec.characters, 'primaryNpcs' | 'relationshipGrowth' | 'favorRules' | 'relationshipEvents' | 'requestRewards'>
 const resourceReuseDemo = requestedScreen === 'resource-reuse'
@@ -44,14 +61,10 @@ const reuseDrawerOpen = ref(false)
 const reuseFeedback = ref(false)
 const relationshipSnapshot = ref<Readonly<RelationshipDraft> | null>(null)
 let reuseFeedbackTimer: number | null = null
-const pendingContext = ref<SpecContext | null>(null)
-const hasUsedGenerationError = ref(false)
 const forceGenerationError = new URLSearchParams(window.location.search).get('specError') === '1'
 const forceBuildError = new URLSearchParams(window.location.search).get('buildError') === '1'
 const forceScopeError = new URLSearchParams(window.location.search).get('scopeError') === '1'
-const hasUsedBuildError = ref(false)
-const hasUsedScopeError = ref(false)
-const changePlan = ref<ChangePlan | null>(null)
+const changePlan = computed(() => session.changePlan)
 const versionHistoryOpen = ref(false)
 const releaseReviewOpen = ref(false)
 const releaseDetailOpen = ref(false)
@@ -68,7 +81,6 @@ const currentRelease = ref<ReleaseRecord | null>(props.initialRelease ?? (diverg
   status: 'published', createdAt: '上一正式里程碑',
 } : null))
 const releaseDraft = reactive<ReleaseDraft>(createReleaseDraft())
-let activeTimer: number | null = null
 
 function createReleaseDraft(): ReleaseDraft {
   const nextVersion = (currentRelease.value?.version ?? 0) + 1
@@ -88,13 +100,7 @@ function resetReleaseDraft() {
   Object.assign(releaseDraft, createReleaseDraft())
 }
 
-const messages = ref<CoworkMessage[]>([
-  {
-    id: 'spec-start',
-    role: 'ai',
-    text: '游戏设计已经确认。我正在把它整理成第一版可以实际制作的游戏规格，并会主动控制范围，避免第一版过大。',
-  },
-])
+const messages = computed(() => session.messages)
 
 const specTabs = [
   { id: 'gamespec' as const, label: 'GAME SPEC', icon: ScrollText },
@@ -144,11 +150,6 @@ const generationSteps = computed(() => [
   { label: 'Preparing validation criteria', state: phase.value === 'review' ? 'done' : 'upcoming' },
 ])
 
-function clearTimer() {
-  if (activeTimer !== null) window.clearTimeout(activeTimer)
-  activeTimer = null
-}
-
 function cloneRelationshipDraft(): RelationshipDraft {
   return {
     primaryNpcs: spec.characters.primaryNpcs,
@@ -188,138 +189,37 @@ function dismissRelationshipResource() {
   reuseState.value = 'dismissed'
 }
 
-function startGeneration() {
-  clearTimer()
-  phase.value = 'generating'
-  activeTimer = window.setTimeout(() => {
-    if (forceGenerationError && !hasUsedGenerationError.value) {
-      hasUsedGenerationError.value = true
-      phase.value = 'generation_error'
-      return
-    }
-    phase.value = 'review'
-    messages.value.push({
-      id: 'spec-ready',
-      role: 'ai',
-      text: resourceReuseDemo
-        ? '第一版 GameSpec 已经整理好了。我保留了咖啡经营和人物关系的核心，并把第一版收敛成可以先完成订单、认识店员与常客的可玩闭环。你可以直接确认，也可以选择任何 Section 让我调整。'
-        : '第一版 GameSpec 已经整理好了。我保留了你确认的关系成长核心，同时把完整多代经营收敛成一个可以先做出来试玩的版本。你可以直接确认，也可以选择任何 Section 让我调整。',
-    })
-  }, 1250)
-}
-
 function selectContext(context: SpecContext) {
   selectedContext.value = context
 }
 
 function askForRevision(text: string) {
-  if (!selectedContext.value || phase.value !== 'review') return
-  pendingContext.value = selectedContext.value
-  messages.value.push({ id: `user-${Date.now()}`, role: 'user', text })
-  phase.value = 'revising'
-  clearTimer()
-  activeTimer = window.setTimeout(() => {
-    phase.value = 'review'
-    messages.value.push({
-      id: `proposal-${Date.now()}`,
-      role: 'ai',
-      text: pendingContext.value?.key === 'characters'
-        ? '可以。我会把 Lucy 的关系行为调整成“陌生 → 熟悉 → 亲近”，并让每个阶段使用不同的对话池。'
-        : `可以。我会更新 ${pendingContext.value?.label ?? '当前 Section'}，同时保持 First Playable 的范围不继续膨胀。`,
-      action: 'apply-revision',
-    })
-  }, 820)
+  if (!selectedContext.value) return
+  requestSpecRevision(session.id, selectedContext.value, text)
 }
 
 function applyRevision() {
-  const context = pendingContext.value
-  if (!context) return
-  messages.value = messages.value.map((message) => (
-    message.action === 'apply-revision' ? { ...message, action: undefined } : message
-  ))
-  if (context.key === 'characters') {
-    spec.characters.dialogueStates = ['陌生', '熟悉', '亲近']
-    if (!spec.characters.npcBehaviors.includes('按关系阶段切换对话池')) spec.characters.npcBehaviors.push('按关系阶段切换对话池')
-    if (!spec.validation.includes('Lucy 的对话会随关系阶段变化')) spec.validation.push('Lucy 的对话会随关系阶段变化')
-  } else if (context.key === 'gameplay' && !spec.gameplay.actions.includes('关系事件选择')) {
-    spec.gameplay.actions.push('关系事件选择')
-  } else if (context.key === 'scope' && !spec.scope.included.includes('三阶段 NPC 对话')) {
-    spec.scope.included.push('三阶段 NPC 对话')
-  } else if (context.key === 'validation' && !spec.validation.includes('所有关键状态变化都能被玩家看见')) {
-    spec.validation.push('所有关键状态变化都能被玩家看见')
-  }
-  if (!spec.updatedSections.includes(context.key)) spec.updatedSections.push(context.key)
-  spec.draftLabel = 'Draft updated · v1'
-  messages.value.push({ id: `applied-${Date.now()}`, role: 'system', text: `${context.label} 已更新到 GameSpec v1 Draft。` })
+  applySpecRevision(session.id)
   selectedContext.value = null
-  pendingContext.value = null
 }
 
 function requestConfirmation() {
-  if (phase.value !== 'review') return
-  phase.value = 'confirming'
+  requestSpecConfirmation(session.id)
 }
 
 function confirmGameSpec() {
-  phase.value = 'spec_confirmed'
-  clearTimer()
-  activeTimer = window.setTimeout(() => {
-    phase.value = 'build_starting'
-    activeTab.value = 'build'
-    startBuildTimeline()
-  }, 820)
-}
-
-const buildSequence: BuildPhase[] = [
-  'building_foundation', 'building_core', 'building_interaction',
-  'building_presentation', 'building_progression', 'validating',
-  'auto_fixing', 'validating_complete', 'playable_ready',
-]
-
-function advanceBuild(index: number) {
-  if (index >= buildSequence.length) return
-  clearTimer()
-  const next = buildSequence[index]!
-  const delay = next === 'auto_fixing' ? 1150 : next === 'validating_complete' ? 1050 : 850
-  activeTimer = window.setTimeout(() => {
-    if (next === 'building_presentation' && forceBuildError && !hasUsedBuildError.value) {
-      hasUsedBuildError.value = true
-      phase.value = 'build_error'
-      return
-    }
-    phase.value = next
-    if (next === 'playable_ready') {
-      activeTab.value = 'preview'
-      clearTimer()
-      activeTimer = window.setTimeout(() => { phase.value = 'showing_recommendations' }, 650)
-      return
-    }
-    advanceBuild(index + 1)
-  }, delay)
-}
-
-function startBuildTimeline() {
-  phase.value = 'build_starting'
   activeTab.value = 'build'
-  advanceBuild(0)
+  confirmSpecAndStartBuild(session.id)
 }
 
 function retryBuildStage() {
-  if (phase.value !== 'build_error') return
-  phase.value = 'building_presentation'
-  advanceBuild(4)
+  retryBuild(session.id)
 }
 
 function requestChange(source: ChangeSource, request?: string) {
-  changePlan.value = createChangePlan(source, request)
   versionHistoryOpen.value = false
-  phase.value = 'change_requested'
   activeTab.value = 'change'
-  clearTimer()
-  activeTimer = window.setTimeout(() => {
-    phase.value = 'analyzing_change'
-    activeTimer = window.setTimeout(() => { phase.value = 'change_review' }, 900)
-  }, 260)
+  requestProjectChange(session.id, source, request)
 }
 
 function selectDirection(directionId: string) {
@@ -330,61 +230,28 @@ function selectDirection(directionId: string) {
 }
 
 function cancelChange() {
-  clearTimer()
-  changePlan.value = null
-  phase.value = 'showing_recommendations'
+  cancelProjectChange(session.id)
   activeTab.value = 'preview'
 }
 
-const changeSequence: ChangePhase[] = [
-  'reusing_unaffected_content', 'applying_gameplay_change', 'applying_visual_change',
-  'checking_scope', 'building_working_version', 'validating_change',
-  'auto_fixing_change', 'validation_complete_change', 'playable_v2_ready',
-]
-
-function advanceChange(index: number) {
-  if (index >= changeSequence.length) return
-  clearTimer()
-  const next = changeSequence[index]!
-  const delay = next === 'auto_fixing_change' ? 1100 : next === 'validation_complete_change' ? 950 : 800
-  activeTimer = window.setTimeout(() => {
-    if (next === 'checking_scope' && forceScopeError && !hasUsedScopeError.value) {
-      hasUsedScopeError.value = true
-      phase.value = 'scope_violation'
-      return
-    }
-    phase.value = next
-    if (next === 'playable_v2_ready') {
-      playableVersion.value = 2
-      activeTab.value = 'preview'
-      return
-    }
-    advanceChange(index + 1)
-  }, delay)
-}
-
 function applyControlledChange() {
-  if (!changePlan.value || phase.value !== 'change_review') return
-  phase.value = 'preparing_working_build'
   activeTab.value = 'change'
-  advanceChange(0)
+  applyProjectControlledChange(session.id)
 }
 
 function retryScopeViolation() {
-  if (phase.value !== 'scope_violation') return
-  phase.value = 'reusing_unaffected_content'
-  advanceChange(1)
+  retryProjectScopeViolation(session.id)
 }
 
 function openVersionHistory() {
   if (phase.value !== 'playable_v2_ready' && phase.value !== 'version_history') return
-  phase.value = 'version_history'
+  session.phase = 'version_history'
   versionHistoryOpen.value = true
 }
 
 function closeVersionHistory() {
   versionHistoryOpen.value = false
-  if (phase.value === 'version_history') phase.value = 'playable_v2_ready'
+  if (phase.value === 'version_history') session.phase = 'playable_v2_ready'
 }
 
 function openReleaseReview() {
@@ -400,8 +267,7 @@ function openReleaseReview() {
 function publishRelease() {
   if (releasePhase.value !== 'review' && releasePhase.value !== 'error') return
   releasePhase.value = 'publishing'
-  clearTimer()
-  activeTimer = window.setTimeout(() => {
+  scheduleJob(session.id, 'publish', () => {
     if (forcePublishError && !hasUsedPublishError.value) {
       hasUsedPublishError.value = true
       releasePhase.value = 'error'
@@ -443,14 +309,14 @@ function reviewResources() {
   emit('reviewResources', currentRelease.value)
 }
 
-if (startInPublish) {
-  changePlan.value = createChangePlan('suggested_next_step')
-} else if (startInChange) {
-  changePlan.value = createChangePlan('suggested_next_step')
-} else if (startInBuild) startBuildTimeline()
-else startGeneration()
+setDebugFlags({ specError: forceGenerationError, buildError: forceBuildError, scopeError: forceScopeError })
+
+if (startInPublish || startInChange) {
+  requestProjectChange(session.id, 'suggested_next_step')
+  session.phase = startInPublish ? 'playable_v2_ready' : 'showing_recommendations'
+} else if (startInBuild) startBuildTimeline(session.id)
+else if (session.phase === 'generating' && session.messages.length === 0) startGeneration(session.id)
 onBeforeUnmount(() => {
-  clearTimer()
   if (reuseFeedbackTimer !== null) window.clearTimeout(reuseFeedbackTimer)
 })
 </script>
@@ -482,7 +348,7 @@ onBeforeUnmount(() => {
       :context="selectedContext"
       @submit="askForRevision"
       @apply="applyRevision"
-      @retry="startGeneration"
+      @retry="startGeneration(session.id)"
       @clear-context="selectedContext = null"
     />
 
