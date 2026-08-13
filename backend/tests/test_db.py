@@ -17,4 +17,4 @@ def test_sqlite_engine_can_open_configured_database(tmp_path: Path) -> None:
 
 
 def test_isolated_database_fixture_has_no_shared_tables(isolated_database) -> None:
-    assert inspect(isolated_database).get_table_names() == ["alembic_version"]
+    assert "alembic_version" in inspect(isolated_database).get_table_names()

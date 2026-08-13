@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -59,7 +59,14 @@ class GameSpecRevision(Base):
 
 class Build(Base):
     __tablename__ = "builds"
-    __table_args__ = (Index("uq_active_build_project", "project_id", unique=True, sqlite_where=(status.in_(("pending", "running", "cancelling")))),)
+    __table_args__ = (
+        Index(
+            "uq_active_build_project",
+            "project_id",
+            unique=True,
+            sqlite_where=text("status IN ('pending','running','cancelling')"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
