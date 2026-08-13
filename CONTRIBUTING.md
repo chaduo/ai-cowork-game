@@ -8,10 +8,13 @@ git pull --ff-only
 git submodule update --init --recursive
 ```
 
-每个 Change 使用独立 branch：
+每个 Change 使用独立 worktree 和 branch。主目录保持干净：
 
 ```bash
-git switch -c feature/cxx-change-name
+git fetch origin
+git worktree add .worktrees/cxx-change-name -b feature/cxx-change-name origin/main
+cd .worktrees/cxx-change-name
+git submodule update --init --recursive
 ```
 
 先阅读 [`docs/development/V1_CHANGE_CATALOG.md`](docs/development/V1_CHANGE_CATALOG.md) 和当天的 [`docs/development/V1_DEMO_IMPLEMENTATION_SCHEDULE_2026-08-20.md`](docs/development/V1_DEMO_IMPLEMENTATION_SCHEDULE_2026-08-20.md)，再按 [`docs/development/DAILY_DEVELOPMENT_CHECKLIST.md`](docs/development/DAILY_DEVELOPMENT_CHECKLIST.md) 开工。
@@ -46,3 +49,14 @@ PR 标题包含 Change ID，例如：
 ```
 
 PR 说明至少包含：Change/OpenSpec 路径、完成内容、Out of Scope、验收证据、测试命令和 Reviewer 重点。Required Reviewer 批准、验证通过且无冲突后再合并。
+
+合并后回到主目录清理：
+
+```bash
+cd /Users/zhaozhuo/workspace/explore/ai-cowork-game
+git switch main
+git pull --ff-only
+git worktree remove .worktrees/cxx-change-name
+git worktree prune
+git branch -d feature/cxx-change-name
+```

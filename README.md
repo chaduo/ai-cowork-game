@@ -53,6 +53,6 @@ git submodule update --init --recursive
 
 ## 协作原则
 
-一个 Change 对应一个 Owner、一个 feature branch 和一个 PR。业务生命周期的状态变更必须经过项目状态层；前端不绕过 Human Gate 推进状态。真实 OpenGame 验收与 Fake contract test 分开记录，不能用 demo fixture 冒充端到端 evidence。
+一个 Change 对应一个 Owner、一个 feature branch、一个独立 worktree 和一个 PR。主目录保持在 `main`，实现和测试放在 `.worktrees/<change-name>/`。业务生命周期的状态变更必须经过项目状态层；前端不绕过 Human Gate 推进状态。真实 OpenGame 验收与 Fake contract test 分开记录，不能用 demo fixture 冒充端到端 evidence。
 
 详见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。

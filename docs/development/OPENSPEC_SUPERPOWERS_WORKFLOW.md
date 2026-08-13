@@ -127,6 +127,20 @@ Status = Blocked
 
 不要提前实现。
 
+选定 Change 后，先建立隔离 worktree，再开始 Brief、Explore 或 Propose：
+
+```bash
+cd /Users/zhaozhuo/workspace/explore/ai-cowork-game
+git switch main
+git pull --ff-only
+git fetch origin
+git worktree add .worktrees/<change-name> -b feature/<change-name> origin/main
+cd .worktrees/<change-name>
+git submodule update --init --recursive
+```
+
+从这一步开始，该 Change 的 OpenSpec artifacts、代码、测试和 commit 都只能在这个 worktree 中完成。主目录保持干净，便于同时创建另一个 Change 的 worktree。
+
 ---
 
 # 4. Step 1 — 创建 Change Brief
@@ -376,6 +390,7 @@ superpowers:executing-plans
 3. 发现 Spec 问题时先修改 Spec，再继续。
 4. 每个独立任务完成后测试。
 5. 保持小 Commit。
+6. 始终在当前 Change 对应的 `.worktrees/<change-name>/` 中执行；不要让 AI 写入主目录或另一个 Change 的 worktree。
 
 ---
 
@@ -504,6 +519,9 @@ V1_CHANGE_CATALOG
 Select Change
        │
        ↓
+Create isolated worktree
+       │
+       ↓
 Change Brief
        │
        ↓
@@ -541,6 +559,9 @@ main
        │
        ↓
 /opsx:archive
+
+       ↓
+Remove merged worktree
 ```
 
 ---
