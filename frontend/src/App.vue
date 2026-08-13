@@ -6,11 +6,29 @@ import MyResources from './screens/MyResources.vue'
 import ResourceReviewWorkspace from './screens/ResourceReviewWorkspace.vue'
 import type { ConfirmedGameDesign } from './components/kickoff/kickoffTypes'
 import type { ReleaseRecord } from './components/workspace/releaseTypes'
-import { createProject, getActiveProject, getPendingResourceCount, openProject, projectStore, updateSavedResourceMetadata } from './stores/projectStore'
+import { configureDemoRuntime, createProject, getActiveProject, getPendingResourceCount, openProject, projectStore, updateSavedResourceMetadata } from './stores/projectStore'
+import { seedDemo, type AppSurface } from './stores/demoSeeds'
 
-type AppSurface = 'projects' | 'workspace' | 'resources' | 'review'
-const surface = ref<AppSurface>('projects')
-const reviewedRelease = ref<ReleaseRecord | null>(null)
+function parseDemoFlags(search: string) {
+  const params = new URLSearchParams(search)
+  return {
+    specError: params.get('specError') === '1',
+    buildError: params.get('buildError') === '1',
+    scopeError: params.get('scopeError') === '1',
+    publishError: params.get('publishError') === '1',
+    kickoffError: params.get('kickoffError') === '1',
+  }
+}
+
+const requestedScreen = new URLSearchParams(window.location.search).get('screen')
+const demoNames = new Set<Parameters<typeof seedDemo>[0]>(['gamespec', 'build', 'change', 'publish', 'resource-reuse', 'resources', 'my-resources'])
+const demoFlags = parseDemoFlags(window.location.search)
+if (!requestedScreen) configureDemoRuntime(demoFlags)
+const initialSurface = requestedScreen && demoNames.has(requestedScreen as Parameters<typeof seedDemo>[0])
+  ? seedDemo(requestedScreen as Parameters<typeof seedDemo>[0], demoFlags)
+  : 'projects'
+const surface = ref<AppSurface>(initialSurface)
+const reviewedRelease = ref<ReleaseRecord | null>(initialSurface === 'review' ? getActiveProject()?.releases.at(-1) ?? null : null)
 const activeProject = computed(() => getActiveProject())
 const pendingResourceCount = computed(() => activeProject.value ? getPendingResourceCount(activeProject.value) : 0)
 

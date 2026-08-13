@@ -55,6 +55,12 @@ export const projectStore = reactive<ProjectStore>({
 
 let projectCounter = 0
 
+export function resetProjectStore(): void {
+  projectStore.projects.splice(0)
+  projectStore.activeProjectId = null
+  projectStore.savedResources.splice(0)
+}
+
 export function getProject(id: string): ProjectSession | undefined {
   return projectStore.projects.find((project) => project.id === id)
 }
@@ -382,19 +388,37 @@ export type WorkspaceDebugFlags = {
   publishError: boolean
 }
 
-const debugFlags: WorkspaceDebugFlags = {
+const defaultDebugFlags: WorkspaceDebugFlags = {
   specError: false,
   buildError: false,
   scopeError: false,
   publishError: false,
 }
 
-export function setDebugFlags(flags: Partial<WorkspaceDebugFlags>): void {
-  Object.assign(debugFlags, flags)
+export type DemoErrorFlags = WorkspaceDebugFlags & {
+  kickoffError: boolean
 }
 
-export function getDebugFlags(): WorkspaceDebugFlags {
-  return debugFlags
+export const runtimeConfig = reactive({
+  kickoffError: false,
+  projectDebugFlags: new Map<string, WorkspaceDebugFlags>(),
+})
+
+export function setProjectDebugFlags(projectId: string, flags: Partial<WorkspaceDebugFlags>): void {
+  runtimeConfig.projectDebugFlags.set(projectId, { ...defaultDebugFlags, ...flags })
+}
+
+export function getProjectDebugFlags(projectId: string): WorkspaceDebugFlags {
+  return runtimeConfig.projectDebugFlags.get(projectId) ?? defaultDebugFlags
+}
+
+export function configureDemoRuntime(flags: Partial<DemoErrorFlags>): void {
+  runtimeConfig.kickoffError = flags.kickoffError ?? false
+}
+
+export function resetDemoRuntime(): void {
+  runtimeConfig.kickoffError = false
+  runtimeConfig.projectDebugFlags.clear()
 }
 
 type ErrorInjectionKind = 'generation' | 'build' | 'scope' | 'publish'
@@ -411,28 +435,32 @@ function consumeErrorInjection(projectId: string, kind: ErrorInjectionKind): boo
   return true
 }
 
+export function completeGeneration(projectId: string): void {
+  const session = getProject(projectId)
+  if (!session) return
+  if (getProjectDebugFlags(projectId).specError && consumeErrorInjection(projectId, 'generation')) {
+    session.phase = 'generation_error'
+    touchProject(session)
+    return
+  }
+  session.phase = 'review'
+  if (!session.messages.some((message) => message.id === 'spec-ready')) session.messages.push({
+    id: 'spec-ready',
+    role: 'ai',
+    text: session.design.scenarioId === 'coffee-shop'
+      ? '第一版 GameSpec 已经整理好了。我保留了咖啡经营和人物关系的核心，并把第一版收敛成可以先完成订单、认识店员与常客的可玩闭环。你可以直接确认，也可以选择任何 Section 让我调整。'
+      : '第一版 GameSpec 已经整理好了。我保留了你确认的关系成长核心，同时把完整多代经营收敛成一个可以先做出来试玩的版本。你可以直接确认，也可以选择任何 Section 让我调整。',
+  })
+  refreshResourceMatches(projectId)
+  touchProject(session)
+}
+
 export function startGeneration(projectId: string): void {
   const session = getProject(projectId)
   if (!session) return
   session.phase = 'generating'
   touchProject(session)
-  scheduleJob(projectId, 'generation', () => {
-    if (debugFlags.specError && consumeErrorInjection(projectId, 'generation')) {
-      session.phase = 'generation_error'
-      touchProject(session)
-      return
-    }
-    session.phase = 'review'
-    if (!session.messages.some((message) => message.id === 'spec-ready')) session.messages.push({
-      id: 'spec-ready',
-      role: 'ai',
-      text: session.design.scenarioId === 'coffee-shop'
-        ? '第一版 GameSpec 已经整理好了。我保留了咖啡经营和人物关系的核心，并把第一版收敛成可以先完成订单、认识店员与常客的可玩闭环。你可以直接确认，也可以选择任何 Section 让我调整。'
-        : '第一版 GameSpec 已经整理好了。我保留了你确认的关系成长核心，同时把完整多代经营收敛成一个可以先做出来试玩的版本。你可以直接确认，也可以选择任何 Section 让我调整。',
-    })
-    refreshResourceMatches(projectId)
-    touchProject(session)
-  }, 1250)
+  scheduleJob(projectId, 'generation', () => completeGeneration(projectId), 1250)
 }
 
 export function requestSpecRevision(projectId: string, context: SpecContext, text: string): void {
@@ -514,7 +542,7 @@ function advanceBuild(projectId: string, index: number): void {
   const next = buildSequence[index]!
   const delay = next === 'auto_fixing' ? 1150 : next === 'validating_complete' ? 1050 : 850
   scheduleJob(projectId, 'build', () => {
-    if (next === 'building_presentation' && debugFlags.buildError && consumeErrorInjection(projectId, 'build')) {
+    if (next === 'building_presentation' && getProjectDebugFlags(projectId).buildError && consumeErrorInjection(projectId, 'build')) {
       session.phase = 'build_error'
       touchProject(session)
       return
@@ -587,7 +615,7 @@ function advanceChange(projectId: string, index: number): void {
   const next = changeSequence[index]!
   const delay = next === 'auto_fixing_change' ? 1100 : next === 'validation_complete_change' ? 950 : 800
   scheduleJob(projectId, 'change', () => {
-    if (next === 'checking_scope' && debugFlags.scopeError && consumeErrorInjection(projectId, 'scope')) {
+    if (next === 'checking_scope' && getProjectDebugFlags(projectId).scopeError && consumeErrorInjection(projectId, 'scope')) {
       session.phase = 'scope_violation'
       touchProject(session)
       return
@@ -625,6 +653,13 @@ export function setWorkspacePhase(projectId: string, nextPhase: WorkspacePhase):
   touchProject(session)
 }
 
+export function acknowledgeResourceBridge(projectId: string): void {
+  const session = getProject(projectId)
+  if (!session) return
+  session.resourceBridgeAcknowledged = true
+  touchProject(session)
+}
+
 export function seedChangeDemo(projectId: string, nextPhase: 'showing_recommendations' | 'playable_v2_ready'): void {
   const session = getProject(projectId)
   if (!session) return
@@ -642,6 +677,24 @@ export function prepareReleaseReview(projectId: string): void {
   touchProject(session)
 }
 
+export function seedPublishedRelease(projectId: string): ReleaseRecord | null {
+  const session = getProject(projectId)
+  if (!session) return null
+  const draft = createReleaseDraftForProject(projectId)
+  if (!draft) return null
+  const release: ReleaseRecord = {
+    ...draft,
+    id: `release-v${draft.version}`,
+    status: 'published',
+    createdAt: '刚刚',
+  }
+  session.releases.push(release)
+  session.resourceBatches[release.id] = createResourceCandidates(session, release).map((candidate) => ({ candidate, state: 'pending' }))
+  session.releasePhase = 'success'
+  touchProject(session)
+  return release
+}
+
 export function updateReleaseDraft(projectId: string, patch: Partial<ReleaseDraft>): void {
   const session = getProject(projectId)
   if (!session) return
@@ -655,20 +708,11 @@ export function publishRelease(projectId: string): void {
   session.releasePhase = 'publishing'
   touchProject(session)
   scheduleJob(projectId, 'publish', () => {
-    if (debugFlags.publishError && consumeErrorInjection(projectId, 'publish')) {
+    if (getProjectDebugFlags(projectId).publishError && consumeErrorInjection(projectId, 'publish')) {
       session.releasePhase = 'error'
       touchProject(session)
       return
     }
-    const release: ReleaseRecord = {
-      ...session.releaseDraft,
-      id: `release-v${session.releaseDraft.version}`,
-      status: 'published' as const,
-      createdAt: '刚刚',
-    }
-    session.releases.push(release)
-    session.resourceBatches[release.id] = createResourceCandidates(session, release).map((candidate) => ({ candidate, state: 'pending' }))
-    session.releasePhase = 'success'
-    touchProject(session)
+    seedPublishedRelease(projectId)
   }, 900)
 }

@@ -39,10 +39,8 @@ import {
   createReleaseDraftForProject,
   getCurrentPlayable,
   restorePlayable,
-  seedChangeDemo,
+  acknowledgeResourceBridge as acknowledgeProjectResourceBridge,
   setWorkspacePhase,
-  setDebugFlags,
-  startBuildTimeline,
   startGeneration,
   refreshResourceMatches,
   projectStore,
@@ -53,36 +51,23 @@ import {
 const props = withDefaults(defineProps<{ design: ConfirmedGameDesign; initialRelease?: ReleaseRecord | null; resourcePendingCount?: number }>(), { initialRelease: null, resourcePendingCount: 3 })
 const emit = defineEmits<{ back: []; resources: []; reviewResources: [release: ReleaseRecord] }>()
 
-const requestedScreen = new URLSearchParams(window.location.search).get('screen')
-const startInBuild = requestedScreen === 'build'
-const startInChange = requestedScreen === 'change'
-const startInPublish = requestedScreen === 'publish' || requestedScreen === 'resources'
 const session = getActiveProject()!
 const phase = computed(() => session.phase)
-const activeTab = ref<ArtifactTab>(startInPublish || startInChange ? 'preview' : startInBuild ? 'build' : 'gamespec')
+const activeTab = ref<ArtifactTab>(session.phase.includes('build') ? 'build' : session.phase.includes('change') || session.phase === 'playable_v2_ready' ? 'preview' : 'gamespec')
 const selectedContext = ref<SpecContext | null>(null)
 const spec = session.spec
 const reuseDrawerOpen = ref(false)
 const reuseFeedback = ref(false)
 let reuseFeedbackTimer: number | null = null
-const forceGenerationError = new URLSearchParams(window.location.search).get('specError') === '1'
-const forceBuildError = new URLSearchParams(window.location.search).get('buildError') === '1'
-const forceScopeError = new URLSearchParams(window.location.search).get('scopeError') === '1'
 const changePlan = computed(() => session.changePlan)
 const versionHistoryOpen = ref(false)
 const releaseReviewOpen = ref(false)
 const releaseDetailOpen = ref(false)
 const releasePhase = computed(() => session.releasePhase)
-const divergedReleaseDemo = new URLSearchParams(window.location.search).get('diverged') === '1'
-const resourceBridgeAcknowledged = ref(false)
+const resourceBridgeAcknowledged = computed(() => session.resourceBridgeAcknowledged)
 const playable = computed(() => getCurrentPlayable(session))
 const playableVersion = computed(() => playable.value?.version ?? 0)
-const currentRelease = computed<ReleaseRecord | null>(() => session.releases.at(-1) ?? props.initialRelease ?? (divergedReleaseDemo ? {
-  id: 'release-v1', version: 1, name: '多代田园物语 · First Release',
-  description: '完成核心经营、NPC 关系与代际传承体验的第一个正式版本。',
-  basedOnPlayable: 2, basedOnGameDesign: 2, basedOnGameSpec: 2,
-  status: 'published', createdAt: '上一正式里程碑',
-} : null))
+const currentRelease = computed<ReleaseRecord | null>(() => session.releases.at(-1) ?? props.initialRelease ?? null)
 const releaseDraft = session.releaseDraft
 
 function createReleaseDraft(): ReleaseDraft {
@@ -268,7 +253,7 @@ function continueDevelopment() {
 }
 
 function acknowledgeResourceBridge() {
-  resourceBridgeAcknowledged.value = true
+  acknowledgeProjectResourceBridge(session.id)
 }
 
 function reviewResources() {
@@ -284,13 +269,9 @@ function restoreVersion(version: number) {
   }
 }
 
-setDebugFlags({ specError: forceGenerationError, buildError: forceBuildError, scopeError: forceScopeError, publishError: new URLSearchParams(window.location.search).get('publishError') === '1' })
 refreshResourceMatches(session.id)
 
-if (startInPublish || startInChange) {
-  seedChangeDemo(session.id, startInPublish ? 'playable_v2_ready' : 'showing_recommendations')
-} else if (startInBuild) startBuildTimeline(session.id)
-else if (session.phase === 'generating' && session.messages.length === 0) startGeneration(session.id)
+if (session.phase === 'generating' && session.messages.length === 0) startGeneration(session.id)
 onBeforeUnmount(() => {
   if (reuseFeedbackTimer !== null) window.clearTimeout(reuseFeedbackTimer)
 })

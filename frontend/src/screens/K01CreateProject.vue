@@ -12,6 +12,7 @@ import {
 import CreativeKickoffModal from '../components/kickoff/CreativeKickoffModal.vue'
 import type { ConfirmedGameDesign } from '../components/kickoff/kickoffTypes'
 import type { ProjectSession } from '../stores/projectStore'
+import { runtimeConfig } from '../stores/projectStore'
 
 const props = defineProps<{ projects: ProjectSession[] }>()
 const emit = defineEmits<{ enterWorkspace: [design: ConfirmedGameDesign]; openProject: [projectId: string]; resources: [] }>()
@@ -76,7 +77,7 @@ const creatorRef = ref<HTMLElement | null>(null)
 const templateSectionRef = ref<HTMLElement | null>(null)
 const ideaInputRef = ref<HTMLTextAreaElement | null>(null)
 const createButtonRef = ref<HTMLButtonElement | null>(null)
-const forceMockError = new URLSearchParams(window.location.search).get('kickoffError') === '1'
+const forceMockError = computed(() => runtimeConfig.kickoffError)
 
 const selectedTemplate = computed(() =>
   templates.find((template) => template.id === selectedTemplateId.value) ?? null,
