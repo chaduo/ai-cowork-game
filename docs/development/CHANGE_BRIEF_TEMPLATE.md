@@ -1,6 +1,6 @@
 # Change Brief Template
 
-> 用途：一个 Change 准备进入开发时，用本模板明确需求边界。  
+> 用途：一个 Change 准备进入开发时，用本模板明确需求边界。
 > Change Brief 是 OpenSpec 的输入，不是另一个长期维护的正式 Spec。
 
 建议路径：
@@ -21,11 +21,11 @@ docs/change-briefs/opengame-agent-adapter.md
 
 ## 1. Metadata
 
-**Change ID:** CXX  
-**Owner:**  
-**Reviewer:**  
-**Priority:** P0 / P1 / P2  
-**Depends On:**  
+**Change ID:** CXX
+**Owner:**
+**Reviewer:**
+**Priority:** P0 / P1 / P2
+**Depends On:**
 **Status:** Backlog / Ready / In Progress / Review / Blocked / Done
 
 ---
@@ -99,9 +99,9 @@ GameBuildResult
 
 明确本 Change 必须实现什么。
 
-- [ ] 
-- [ ] 
-- [ ] 
+- [ ]
+- [ ]
+- [ ]
 
 要求：
 
@@ -115,9 +115,9 @@ GameBuildResult
 
 明确本 Change **不允许顺手实现什么**。
 
-- 
-- 
-- 
+-
+-
+-
 
 这是防止 Scope Creep 的关键部分。
 
@@ -343,13 +343,13 @@ Handle errors appropriately.
 
 ### Unit Tests
 
-- [ ] 
-- [ ] 
+- [ ]
+- [ ]
 
 ### Integration Tests
 
-- [ ] 
-- [ ] 
+- [ ]
+- [ ]
 
 ### E2E
 
