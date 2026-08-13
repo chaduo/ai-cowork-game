@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { Check, GitCommitHorizontal, History, X } from 'lucide-vue-next'
+import type { PlayableVersionRecord } from './workspaceTypes'
 
-defineProps<{ open: boolean }>()
-defineEmits<{ close: [] }>()
+const props = defineProps<{ open: boolean; versions: PlayableVersionRecord[]; designVersion: number; specVersion: number }>()
+defineEmits<{ close: []; restore: [version: number] }>()
 </script>
 
 <template>
@@ -12,21 +13,15 @@ defineEmits<{ close: [] }>()
       <aside class="version-history-drawer" aria-label="版本历史">
         <header><div><span><History :size="13" />版本</span><h2>版本历史</h2><p>只有通过完整验证的版本才会出现在这里。</p></div><button type="button" aria-label="关闭版本历史" @click="$emit('close')"><X :size="16" /></button></header>
         <div class="version-timeline">
-          <article class="version-record is-current">
+          <article v-for="version in [...props.versions].reverse()" :key="version.version" class="version-record" :class="{ 'is-current': version.version === props.versions.at(-1)?.version }">
             <span class="version-marker"><Check :size="13" /></span>
-            <div class="version-record-head"><div><span>v2</span><h3>NPC 关系反馈增强</h3></div><strong>当前 · 稳定</strong></div>
-            <p>Favor 30 触发关系事件，并增加会随 Favor 更新的心形好感条。</p>
-            <ul><li>玩法规则 · 更新</li><li>关系 HUD · 新增</li><li>角色与场景素材 · 复用</li></ul>
-            <footer><span><GitCommitHorizontal :size="12" />基于 Design v2 · GameSpec v2</span><strong>6 / 6 PASS</strong></footer>
-          </article>
-          <article class="version-record">
-            <span class="version-marker"><Check :size="13" /></span>
-            <div class="version-record-head"><div><span>v1</span><h3>初始可玩版本</h3></div><strong>历史 · 稳定</strong></div>
-            <p>种植、经营、Lucy 委托、好感成长和代际目标形成第一版完整循环。</p>
-            <footer><span><GitCommitHorizontal :size="12" />基于 Design v2 · GameSpec v2</span><strong>9 / 9 PASS</strong></footer>
+            <div class="version-record-head"><div><span>v{{ version.version }}</span><h3>{{ version.name }}</h3></div><strong>{{ version.version === props.versions.at(-1)?.version ? '当前 · 稳定' : '历史 · 稳定' }}</strong></div>
+            <p>{{ version.summary }}</p>
+            <ul><li>Playable snapshot · {{ version.reason }}</li><li>Preview · {{ version.snapshot.previewVariant }}</li><li v-if="version.restoredFrom">恢复自 v{{ version.restoredFrom }}</li></ul>
+            <footer><span><GitCommitHorizontal :size="12" />基于 Design v{{ version.basedOnDesign }} · GameSpec v{{ version.basedOnSpec }}</span><button v-if="version.version !== props.versions.at(-1)?.version" type="button" @click="$emit('restore', version.version)">恢复此版本</button></footer>
           </article>
         </div>
-        <footer class="version-history-note"><Check :size="13" />Playable v1 已安全保留。本阶段不提供恢复操作。</footer>
+        <footer class="version-history-note"><Check :size="13" />只有通过验证的 Playable 才会出现在版本历史。当前为 Design v{{ props.designVersion }} · GameSpec v{{ props.specVersion }}。</footer>
       </aside>
     </div>
   </Transition>

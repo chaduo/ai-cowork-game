@@ -36,6 +36,9 @@ import {
   retryScopeViolation as retryProjectScopeViolation,
   prepareReleaseReview,
   publishRelease as publishProjectRelease,
+  createReleaseDraftForProject,
+  getCurrentPlayable,
+  restorePlayable,
   seedChangeDemo,
   setWorkspacePhase,
   setDebugFlags,
@@ -74,7 +77,8 @@ const releaseDetailOpen = ref(false)
 const releasePhase = computed(() => session.releasePhase)
 const divergedReleaseDemo = new URLSearchParams(window.location.search).get('diverged') === '1'
 const resourceBridgeAcknowledged = ref(false)
-const playableVersion = ref(divergedReleaseDemo ? 3 : startInPublish ? 2 : 1)
+const playable = computed(() => getCurrentPlayable(session))
+const playableVersion = computed(() => playable.value?.version ?? 0)
 const currentRelease = computed<ReleaseRecord | null>(() => session.releases.at(-1) ?? props.initialRelease ?? (divergedReleaseDemo ? {
   id: 'release-v1', version: 1, name: '多代田园物语 · First Release',
   description: '完成核心经营、NPC 关系与代际传承体验的第一个正式版本。',
@@ -84,17 +88,7 @@ const currentRelease = computed<ReleaseRecord | null>(() => session.releases.at(
 const releaseDraft = session.releaseDraft
 
 function createReleaseDraft(): ReleaseDraft {
-  const nextVersion = (currentRelease.value?.version ?? 0) + 1
-  return {
-    version: nextVersion,
-    name: nextVersion === 1 ? '多代田园物语 · First Release' : `多代田园物语 · Release ${nextVersion}`,
-    description: nextVersion === 1
-      ? '完成核心经营、NPC 关系与代际传承体验的第一个正式版本。'
-      : '优化 NPC 关系反馈，新增好感 UI 与关系事件。',
-    basedOnPlayable: playableVersion.value,
-    basedOnGameDesign: 2,
-    basedOnGameSpec: 2,
-  }
+  return createReleaseDraftForProject(session.id) ?? session.releaseDraft
 }
 
 function resetReleaseDraft() {
@@ -296,6 +290,13 @@ function reviewResources() {
   emit('reviewResources', currentRelease.value)
 }
 
+function restoreVersion(version: number) {
+  if (restorePlayable(session.id, version)) {
+    versionHistoryOpen.value = false
+    activeTab.value = 'preview'
+  }
+}
+
 setDebugFlags({ specError: forceGenerationError, buildError: forceBuildError, scopeError: forceScopeError, publishError: new URLSearchParams(window.location.search).get('publishError') === '1' })
 
 if (startInPublish || startInChange) {
@@ -422,7 +423,7 @@ onBeforeUnmount(() => {
         <button class="confirm-build" type="button" @click="confirmGameSpec">确认并开始构建 <ArrowRight :size="16" /></button>
       </footer>
     </main>
-    <VersionHistoryDrawer :open="versionHistoryOpen" @close="closeVersionHistory" />
+    <VersionHistoryDrawer :open="versionHistoryOpen" :versions="session.playableVersions" :design-version="session.designVersion" :spec-version="session.specVersion" @close="closeVersionHistory" @restore="restoreVersion" />
     <ReleaseReviewModal
       :open="releaseReviewOpen"
       :phase="releasePhase"

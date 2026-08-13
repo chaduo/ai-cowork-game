@@ -77,6 +77,67 @@ export function getPendingResourceCount(session: ProjectSession): number {
   return batch.filter((item) => item.state === 'pending' || item.state === 'saving').length
 }
 
+export function createPlayableSnapshot(session: ProjectSession): PlayableVersionRecord['snapshot'] {
+  const characters = session.spec.characters
+  const npcNames = characters.npcName.split(/\s*(?:与|、|,|，|&|and)\s*/).filter(Boolean)
+  const previewVariant = session.design.scenarioId === 'farm' ? 'farm' : session.design.scenarioId === 'coffee-shop' ? 'coffee' : 'generic'
+  return {
+    projectTitle: session.spec.title,
+    npcNames,
+    capabilities: [...session.spec.gameplay.actions, ...session.spec.scope.included].slice(0, 8),
+    previewVariant,
+    relationshipSummary: characters.relationshipGrowth,
+  }
+}
+
+export function appendPlayableVersion(projectId: string, input: { name?: string; summary?: string; reason: PlayableVersionRecord['reason']; restoredFrom?: number }): PlayableVersionRecord | null {
+  const session = getProject(projectId)
+  if (!session) return null
+  const version = session.playableVersions.length + 1
+  const record: PlayableVersionRecord = {
+    version,
+    name: input.name ?? `${session.spec.title} · Playable v${version}`,
+    summary: input.summary ?? session.spec.buildTarget.goal,
+    reason: input.reason,
+    restoredFrom: input.restoredFrom,
+    basedOnDesign: session.designVersion,
+    basedOnSpec: session.specVersion,
+    createdAt: Date.now(),
+    snapshot: createPlayableSnapshot(session),
+  }
+  session.playableVersions.push(record)
+  touchProject(session)
+  return record
+}
+
+export function restorePlayable(projectId: string, targetVersion: number): PlayableVersionRecord | null {
+  const session = getProject(projectId)
+  const target = session?.playableVersions.find((version) => version.version === targetVersion)
+  if (!session || !target) return null
+  session.spec.title = target.snapshot.projectTitle
+  session.spec.characters.npcName = target.snapshot.npcNames.join(' 与 ')
+  session.spec.characters.relationshipGrowth = target.snapshot.relationshipSummary
+  return appendPlayableVersion(projectId, { reason: 'restore', restoredFrom: target.version, name: `${session.spec.title} · Restore v${session.playableVersions.length + 1}` })
+}
+
+export function createReleaseDraftForProject(projectId: string): ReleaseDraft | null {
+  const session = getProject(projectId)
+  if (!session) return null
+  const playable = getCurrentPlayable(session)
+  const version = session.releases.length + 1
+  const draft: ReleaseDraft = {
+    version,
+    name: `${session.spec.title} · ${version === 1 ? 'First Release' : `Release ${version}`}`,
+    description: version === 1 ? session.spec.buildTarget.goal : '基于最新稳定 Playable 的正式版本。',
+    basedOnPlayable: playable?.version ?? 0,
+    basedOnGameDesign: session.designVersion,
+    basedOnGameSpec: session.specVersion,
+  }
+  session.releaseDraft = draft
+  touchProject(session)
+  return draft
+}
+
 export function touchProject(session: ProjectSession): void {
   session.updatedAt = Date.now()
 }
@@ -311,6 +372,7 @@ function advanceBuild(projectId: string, index: number): void {
     session.phase = next
     touchProject(session)
     if (next === 'playable_ready') {
+      if (!getCurrentPlayable(session)) appendPlayableVersion(projectId, { reason: 'initial', name: `${session.spec.title} · First Playable` })
       scheduleJob(projectId, 'build', () => {
         session.phase = 'showing_recommendations'
         touchProject(session)
@@ -382,7 +444,10 @@ function advanceChange(projectId: string, index: number): void {
     }
     session.phase = next
     touchProject(session)
-    if (next === 'playable_v2_ready') return
+    if (next === 'playable_v2_ready') {
+      appendPlayableVersion(projectId, { reason: 'change', name: `${session.spec.title} · Playable v${session.playableVersions.length + 1}` })
+      return
+    }
     advanceChange(projectId, index + 1)
   }, delay)
 }
@@ -423,6 +488,7 @@ export function prepareReleaseReview(projectId: string): void {
   const session = getProject(projectId)
   if (!session) return
   session.releasePhase = 'review'
+  createReleaseDraftForProject(projectId)
   touchProject(session)
 }
 
