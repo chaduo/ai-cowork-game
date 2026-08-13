@@ -1,0 +1,5 @@
+[submodule "test/agent-game-forge"]
+	path = test/agent-game-forge
+	url = https://github.com/0x0funky/agent-game-forge.git
+	branch = main
+

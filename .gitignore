@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Frontend build output and local caches
+frontend/dist/
+frontend/.vite/
+frontend/.cache/
+*.tsbuildinfo
+*.log
+
+# Local archives and exports
+*.zip
+*.tgz
+*.tar.gz
+
+# Environment files and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+credentials.json
+secrets.json
+
+# Local databases and runtime data
+*.db
+*.sqlite
+*.sqlite3
+.ogf/
+
+# Operating-system files
+.DS_Store
+**/.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor / IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Test and coverage output
+coverage/
+playwright-report/
+test-results/
+
