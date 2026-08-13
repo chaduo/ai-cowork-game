@@ -9,6 +9,18 @@ export interface ProjectResponse {
   name: string
   original_idea: string
   stage: string
+  updated_at: string
+  current_playable: {
+    id: string
+    number: number
+    artifact_path: string
+  } | null
+  latest_release: {
+    id: string
+    number: number
+    status: string
+    playable_version_id: string
+  } | null
 }
 
 export interface ApiErrorBody {

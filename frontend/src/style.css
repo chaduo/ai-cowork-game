@@ -304,6 +304,10 @@ textarea:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(23, 111, 166,
 .project-list-copy small { color: var(--color-text-muted); font-size: 10px; }
 .project-list-stage { padding: 5px 8px; color: var(--color-verified); font: 600 9px/1 var(--font-mono); background: var(--color-verified-soft); border: 1px solid #b9d8cb; border-radius: 3px; }
 .project-list-item > svg { color: var(--color-text-disabled); }
+.project-list-state { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 20px 10px; border: 1px dashed var(--color-line-strong); background: var(--color-surface-subtle); }
+.project-list-state-kicker { color: var(--color-accent); font: 600 9px/1 var(--font-mono); letter-spacing: .08em; }
+.project-list-state strong { color: var(--color-ink); font-size: 14px; }
+.project-list-state small { color: var(--color-text-muted); font-size: 11px; }
 
 .creator-hero {
   position: relative;

@@ -6,9 +6,9 @@ import MyResources from './screens/MyResources.vue'
 import ResourceReviewWorkspace from './screens/ResourceReviewWorkspace.vue'
 import type { ConfirmedGameDesign } from './components/kickoff/kickoffTypes'
 import type { ReleaseRecord } from './components/workspace/releaseTypes'
-import { configureDemoRuntime, createProject, getActiveProject, getPendingResourceCount, openProject, projectStore, startGeneration, updateSavedResourceMetadata } from './stores/projectStore'
+import { appendPlayableVersion, completeGeneration, configureDemoRuntime, createProject, getActiveProject, getPendingResourceCount, openProject, projectStore, startGeneration, updateSavedResourceMetadata } from './stores/projectStore'
 import { seedDemo, type AppSurface } from './stores/demoSeeds'
-import { listProjectRecords } from './api/client'
+import { getProjectRecord, listProjectRecords, type ProjectResponse } from './api/client'
 
 function parseDemoFlags(search: string) {
   const params = new URLSearchParams(search)
@@ -32,29 +32,76 @@ const surface = ref<AppSurface>(initialSurface)
 const reviewedRelease = ref<ReleaseRecord | null>(initialSurface === 'review' ? getActiveProject()?.releases.at(-1) ?? null : null)
 const activeProject = computed(() => getActiveProject())
 const pendingResourceCount = computed(() => activeProject.value ? getPendingResourceCount(activeProject.value) : 0)
+const projectRecords = ref<ProjectResponse[] | null>(requestedScreen ? null : [])
+const projectsLoading = ref(!requestedScreen)
+const projectListError = ref<string | null>(null)
+
+function designFromRecord(record: ProjectResponse): ConfirmedGameDesign {
+  return {
+    originalIdea: record.original_idea,
+    projectTitle: record.name,
+    scenarioId: 'generic',
+    summary: {
+      title: record.name,
+      summary: record.original_idea,
+      highlights: [],
+      coreLoop: [],
+    },
+    decisions: [],
+  }
+}
+
+function upsertProjectRecord(record: ProjectResponse): void {
+  if (!projectRecords.value) projectRecords.value = []
+  const index = projectRecords.value.findIndex((item) => item.id === record.id)
+  if (index === -1) projectRecords.value.push(record)
+  else projectRecords.value[index] = record
+}
+
+function hydrateProjectSession(record: ProjectResponse) {
+  const existing = projectStore.projects.find((project) => project.id === record.id)
+  const session = existing ?? createProject(designFromRecord(record), record.id)
+  if (existing) openProject(record.id)
+  completeGeneration(session.id)
+  if (record.current_playable && session.playableVersions.length === 0) {
+    appendPlayableVersion(session.id, {
+      reason: 'initial',
+      name: `${record.name} · Playable v${record.current_playable.number}`,
+      summary: '从已保存的 Project 状态恢复。',
+    })
+  }
+  if (record.latest_release && session.releases.length === 0) {
+    session.releases.push({
+      id: record.latest_release.id,
+      version: record.latest_release.number,
+      name: `${record.name} · Release ${record.latest_release.number}`,
+      description: '从已保存的 Project 状态恢复。',
+      basedOnPlayable: record.current_playable?.number ?? 0,
+      basedOnGameDesign: session.designVersion,
+      basedOnGameSpec: session.specVersion,
+      status: 'published',
+      createdAt: new Date(record.updated_at).toLocaleDateString('zh-CN'),
+    })
+  }
+  return session
+}
 
 onMounted(async () => {
-  if (requestedScreen || projectStore.projects.length > 0) return
+  if (requestedScreen) return
+  projectsLoading.value = true
   try {
     const records = await listProjectRecords()
+    projectRecords.value = records
     for (const record of records) {
       if (projectStore.projects.some((project) => project.id === record.id)) continue
-      createProject({
-        originalIdea: record.original_idea,
-        projectTitle: record.name,
-        scenarioId: 'generic',
-        summary: {
-          title: record.name,
-          summary: record.original_idea,
-          highlights: [],
-          coreLoop: [],
-        },
-        decisions: [],
-      }, record.id)
+      hydrateProjectSession(record)
     }
     projectStore.activeProjectId = null
   } catch {
-    // The prototype remains usable with local state when the API is offline.
+    projectListError.value = '暂时无法加载项目列表，请确认后端已启动。'
+    projectRecords.value = []
+  } finally {
+    projectsLoading.value = false
   }
 })
 
@@ -71,14 +118,29 @@ function updateSavedMetadata(payload: { id: string; name: string; summary: strin
   updateSavedResourceMetadata(payload.id, payload)
 }
 
-function enterWorkspace(design: ConfirmedGameDesign, projectId: string) {
+async function enterWorkspace(design: ConfirmedGameDesign, projectId: string) {
+  try {
+    const record = await getProjectRecord(projectId)
+    upsertProjectRecord(record)
+  } catch {
+    projectListError.value = '项目已经创建，但暂时无法读取项目状态。'
+  }
   const session = createProject(design, projectId)
   startGeneration(session.id)
   surface.value = 'workspace'
 }
 
-function openWorkspace(projectId: string) {
-  if (!openProject(projectId)) return
+async function openWorkspace(projectId: string) {
+  if (!openProject(projectId)) {
+    try {
+      const record = await getProjectRecord(projectId)
+      upsertProjectRecord(record)
+      hydrateProjectSession(record)
+    } catch {
+      projectListError.value = '找不到这个项目，可能已经被移除或暂时不可用。'
+      return
+    }
+  }
   surface.value = 'workspace'
 }
 </script>
@@ -87,5 +149,5 @@ function openWorkspace(projectId: string) {
   <MyResources v-if="surface === 'resources'" @projects="surface = 'projects'" @update-metadata="updateSavedMetadata" />
   <ResourceReviewWorkspace v-else-if="surface === 'review' && reviewedRelease && activeProject" :project-id="activeProject.id" :project-name="activeProject.spec.title" :release="reviewedRelease" @back="closeResourceReview()" @resources="closeResourceReview('resources')" @projects="closeResourceReview('projects')" />
   <K02ProjectWorkspace v-else-if="surface === 'workspace' && activeProject" :key="activeProject.id" :design="activeProject.design" :resource-pending-count="pendingResourceCount" @back="surface = 'projects'" @resources="surface = 'resources'" @review-resources="openResourceReview" />
-  <K01CreateProject v-else :projects="projectStore.projects" @open-project="openWorkspace" @enter-workspace="enterWorkspace" @resources="surface = 'resources'" />
+  <K01CreateProject v-else :projects="projectStore.projects" :remote-projects="projectRecords" :projects-loading="projectsLoading" :project-list-error="projectListError" @open-project="openWorkspace" @enter-workspace="enterWorkspace" @resources="surface = 'resources'" />
 </template>
