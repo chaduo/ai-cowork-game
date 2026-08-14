@@ -24,8 +24,8 @@
 - Modify: `backend/tests/test_c05_gamespec_api.py`
 - Modify: `backend/tests/test_migrations.py`
 
-- [ ] Write tests for readiness `not_ready/ready/blocked`, immutable confirmed content, source GDD revision and backfill.
-- [ ] Run focused tests and confirm they fail because the model fields/endpoints do not exist.
+- [x] Write tests for readiness `not_ready/ready/blocked`, immutable confirmed content, source GDD revision and backfill.
+- [x] Run focused tests and confirm they fail because the model fields/endpoints do not exist.
 
 ### Task 2: Implement persistence and schema
 
@@ -34,10 +34,10 @@
 - Modify: `backend/app/contracts/design.py`
 - Modify: `backend/migrations/versions/0007_c05_design_revisions.py`
 
-- [ ] Add revision table, aggregate pointers and GameSpec source pointer.
-- [ ] Add the migration/backfill and verify it is repeatable on empty and existing databases.
-- [ ] Add strict readiness DTOs with legacy payload defaulting to `not_ready`.
-- [ ] Run the focused tests and confirm they pass.
+- [x] Add revision table, aggregate pointers and GameSpec source pointer.
+- [x] Add the migration/backfill and verify it is repeatable on empty and existing databases.
+- [x] Add strict readiness DTOs with legacy payload defaulting to `not_ready`.
+- [x] Run the focused tests and confirm they pass.
 
 ### Task 3: Implement lifecycle invariants
 
@@ -46,10 +46,10 @@
 - Modify: `backend/app/api/design.py`
 - Modify: `backend/app/errors.py` only if a new error code is required
 
-- [ ] Make design save create a new draft revision without mutating confirmed JSON.
-- [ ] Make Confirm GDD validate current revision, readiness and Project ownership atomically.
-- [ ] Capture confirmed GDD provenance on GameSpec drafts and block GameSpec confirmation until the design gate is confirmed.
-- [ ] Run the focused API/service tests and verify error envelopes.
+- [x] Make design save create a new draft revision without mutating confirmed JSON.
+- [x] Make Confirm GDD validate current revision, readiness and Project ownership atomically.
+- [x] Capture confirmed GDD provenance on GameSpec drafts and block GameSpec confirmation until the design gate is confirmed.
+- [x] Run the focused API/service tests and verify error envelopes.
 
 ### Task 4: Regression and handoff
 
@@ -57,6 +57,6 @@
 - Modify: `openspec/changes/c05-contract-conformance/tasks.md`
 - Create: `docs/superpowers/verification/2026-08-14-c05-contract-conformance.md`
 
-- [ ] Run all backend tests, frontend `vue-tsc -b` and `vite build`, OpenSpec strict validation and `git diff --check`.
-- [ ] Verify no Build/OpenGame/Candidate/Resource/Vue business files changed.
-- [ ] Record the test commands, results, migration head and remaining reviewer gate.
+- [x] Run all backend tests, frontend `vue-tsc -b` and `vite build`, OpenSpec strict validation and `git diff --check`.
+- [x] Verify no Build/OpenGame/Candidate/Resource/Vue business files changed.
+- [x] Record the test commands, results, migration head and remaining reviewer gate.
