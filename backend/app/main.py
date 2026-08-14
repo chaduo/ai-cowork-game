@@ -2,6 +2,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from sqlalchemy import text
 
 from app.config import Settings, get_settings
 from app.errors import ApiError, handle_api_error, handle_unexpected_error, handle_validation_error
@@ -33,7 +34,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return response
 
     @app.get("/healthz")
-    def healthz() -> dict[str, str]:
+    def healthz(request: Request) -> dict[str, str]:
+        try:
+            with request.app.state.engine.connect() as connection:
+                connection.execute(text("SELECT 1"))
+        except Exception as cause:
+            raise ApiError("dependency_unavailable", "Database unavailable", [], 503) from cause
         return {
             "status": "ok",
             "service": SERVICE_NAME,
