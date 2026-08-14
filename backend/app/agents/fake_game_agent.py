@@ -34,8 +34,10 @@ class FakeGameAgent(GameAgent):
         self._outcomes = dict(outcome_by_operation or {})
         self._runs: dict[str, _FakeRun] = {}
         self._next_run = 1
+        self.requests: list[GameBuildRequest] = []
 
     async def start(self, request: GameBuildRequest) -> AgentRunHandle:
+        self.requests.append(request)
         run_id = f"fake-run-{self._next_run}"
         self._next_run += 1
         handle = AgentRunHandle(run_id=run_id, build_id=request.build_id)
