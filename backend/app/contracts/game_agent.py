@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -95,6 +95,13 @@ class RunEvent(ContractModel):
     @classmethod
     def reject_human_gate_events(cls, value: str) -> str:
         normalized = value.lower().replace("-", "_")
-        if any(token in normalized for token in _FORBIDDEN_GATE_TOKENS):
+        if any(token in normalized for token in (*_FORBIDDEN_GATE_TOKENS, "resource_save", "save_resource", "saved_resource")):
             raise ValueError("provider events cannot express Human Gate decisions")
         return value
+
+    @field_validator("timestamp")
+    @classmethod
+    def require_utc_timestamp(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("RunEvent timestamp must include a timezone")
+        return value.astimezone(timezone.utc)

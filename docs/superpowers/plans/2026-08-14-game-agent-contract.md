@@ -32,13 +32,13 @@ the contract without coupling it to any provider or lifecycle repository.
   `AgentRunHandle`, and `RunEvent`.
 - `RunEvent` rejects lifecycle gate event kinds and invalid progress; result statuses are terminal and typed.
 
-- [ ] **Step 1: Write failing model tests** covering valid request/result/event, forbidden gate events, invalid
+- [x] **Step 1: Write failing model tests** covering valid request/result/event, forbidden gate events, invalid
   progress, and unsupported status.
-- [ ] **Step 2: Run `pytest backend/tests/test_c06_game_agent_contract.py -q` and verify the new imports fail.**
-- [ ] **Step 3: Implement the minimal Pydantic models with `extra="forbid"`, length bounds, UTC timestamp,
+- [x] **Step 2: Run `pytest backend/tests/test_c06_game_agent_contract.py -q` and verify the new imports fail.**
+- [x] **Step 3: Implement the minimal Pydantic models with `extra="forbid"`, length bounds, UTC timestamp,
   structured error, and artifact path fields.
-- [ ] **Step 4: Run the focused test and then the existing backend suite.**
-- [ ] **Step 5: Commit `feat: add provider-neutral game agent contracts`.**
+- [x] **Step 4: Run the focused test and then the existing backend suite.**
+- [x] **Step 5: Commit `feat: add provider-neutral game agent contracts`.**
 
 ### Task 2: Protocol and deterministic fake agent
 
@@ -56,13 +56,13 @@ the contract without coupling it to any provider or lifecycle repository.
 - `GameAgent.cancel(handle) -> None`.
 - `FakeGameAgent(outcome_by_operation: Mapping[str, GameBuildStatus] | None = None)`.
 
-- [ ] **Step 1: Add failing behavior tests for deterministic success events, terminal result, unsupported operation,
+- [x] **Step 1: Add failing behavior tests for deterministic success events, terminal result, unsupported operation,
   cancellation, timeout, and invalid output.**
-- [ ] **Step 2: Run the focused tests and verify the fake agent/protocol imports or assertions fail.**
-- [ ] **Step 3: Implement the protocol and in-memory fake with stable run IDs, sequence numbers, sanitized
+- [x] **Step 2: Run the focused tests and verify the fake agent/protocol imports or assertions fail.**
+- [x] **Step 3: Implement the protocol and in-memory fake with stable run IDs, sequence numbers, sanitized
   diagnostics, and no lifecycle mutations.
-- [ ] **Step 4: Run focused and full backend tests.**
-- [ ] **Step 5: Commit `feat: add fake game agent contract runtime`.**
+- [x] **Step 4: Run focused and full backend tests.**
+- [x] **Step 5: Commit `feat: add fake game agent contract runtime`.**
 
 ### Task 3: Shared contract suite and documentation alignment
 
@@ -75,10 +75,10 @@ the contract without coupling it to any provider or lifecycle repository.
 - `assert_game_agent_contract(agent_factory)` is reusable by C10 OpenGameAdapter and future Claude/piagent
   adapters.
 
-- [ ] **Step 1: Extract shared assertions for success, event replay ordering, unsupported operation, cancellation,
+- [x] **Step 1: Extract shared assertions for success, event replay ordering, unsupported operation, cancellation,
   timeout, invalid output, and forbidden gate events.**
-- [ ] **Step 2: Run the suite against `FakeGameAgent` and verify all cases pass.**
-- [ ] **Step 3: Align the contract document with the implemented terminal statuses, handle lifecycle, and explicit
+- [x] **Step 2: Run the suite against `FakeGameAgent` and verify all cases pass.**
+- [x] **Step 3: Align the contract document with the implemented terminal statuses, handle lifecycle, and explicit
   C10 adapter reuse boundary without adding provider-specific implementation.
-- [ ] **Step 4: Run `pytest backend/tests -q`, `cd frontend && npx vue-tsc -b && npx vite build`, and `git diff --check`.**
-- [ ] **Step 5: Commit `docs: align game agent contract evidence`.**
+- [x] **Step 4: Run `pytest backend/tests -q`, `cd frontend && npx vue-tsc -b && npx vite build`, and `git diff --check`.**
+- [x] **Step 5: Commit `docs: align game agent contract evidence`.**

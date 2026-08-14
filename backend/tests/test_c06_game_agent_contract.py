@@ -14,6 +14,7 @@ from app.contracts.game_agent import (
     WorkspaceRef,
 )
 from app.agents.fake_game_agent import FakeGameAgent
+from tests.contract_suites.test_game_agent_contract_suite import assert_game_agent_contract
 from app.contracts.gamespec import CreatorGameSpec
 
 
@@ -129,6 +130,36 @@ def test_run_event_rejects_human_gate_decisions() -> None:
         )
 
 
+def test_run_event_requires_timezone_aware_timestamp() -> None:
+    with pytest.raises(ValidationError):
+        RunEvent(
+            run_id="run-1",
+            sequence=1,
+            stage="building",
+            kind="progress",
+            message="进行中",
+            progress=0.5,
+            artifact_ref=None,
+            error=None,
+            timestamp=datetime(2026, 8, 14, 12, 0),
+        )
+
+
+def test_run_event_rejects_resource_save_gate_equivalent() -> None:
+    with pytest.raises(ValidationError):
+        RunEvent(
+            run_id="run-1",
+            sequence=1,
+            stage="finished",
+            kind="resource-save-complete",
+            message="资源已保存",
+            progress=1,
+            artifact_ref=None,
+            error=None,
+            timestamp=datetime.now(timezone.utc),
+        )
+
+
 def test_contract_models_reject_unknown_fields() -> None:
     with pytest.raises(ValidationError):
         AgentRunHandle(run_id="run-1", build_id="build-1", provider_session_id="secret")
@@ -153,6 +184,14 @@ def test_fake_agent_returns_deterministic_success_and_ordered_events() -> None:
     assert [event.sequence for event in events] == [1, 2, 3]
     assert result.status == "succeeded"
     assert result.preview_entry == "dist/index.html"
+
+
+def test_fake_agent_passes_shared_provider_contract_suite() -> None:
+    def request_factory(operation: str) -> GameBuildRequest:
+        actual_operation = "stream_assets" if operation == "unsupported-operation" else operation
+        return valid_request().model_copy(update={"operation": actual_operation})
+
+    assert_game_agent_contract(FakeGameAgent, request_factory)
 
 
 def test_fake_agent_returns_unsupported_for_unknown_operation() -> None:
