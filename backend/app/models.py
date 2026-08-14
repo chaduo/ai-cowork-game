@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 def new_id() -> str:
@@ -127,11 +127,48 @@ class BuildCandidate(Base):
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
     build_id: Mapped[str] = mapped_column(ForeignKey("builds.id"), nullable=False, unique=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
+    test_gate_status: Mapped[str] = mapped_column(String(20), nullable=False, default="untested")
+    parent_candidate_id: Mapped[str | None] = mapped_column(ForeignKey("build_candidates.id"), nullable=True)
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     artifact_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     artifact_checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     diagnostics_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class TestReport(Base):
+    __tablename__ = "test_reports"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    candidate_id: Mapped[str] = mapped_column(ForeignKey("build_candidates.id"), nullable=False, unique=True)
+    runtime_verdict: Mapped[str] = mapped_column(String(20), nullable=False)
+    platform_verdict: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    diagnostics_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    evidence: Mapped[list["TestEvidence"]] = relationship(
+        back_populates="report",
+        cascade="all, delete-orphan",
+        order_by="TestEvidence.created_at",
+    )
+
+
+class TestEvidence(Base):
+    __tablename__ = "test_evidence"
+    __table_args__ = (Index("ix_test_evidence_report_created", "test_report_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    test_report_id: Mapped[str] = mapped_column(ForeignKey("test_reports.id"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    expected: Mapped[str] = mapped_column(Text, nullable=False)
+    observed: Mapped[str] = mapped_column(Text, nullable=False)
+    artifact_ref: Mapped[str] = mapped_column(Text, nullable=False)
+    details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    report: Mapped[TestReport] = relationship(back_populates="evidence")
 
 
 class PlayableVersion(Base):
