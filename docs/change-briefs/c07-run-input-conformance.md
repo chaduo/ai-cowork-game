@@ -7,7 +7,7 @@
 **Reviewer:** zhang（Required Review）
 **Priority:** P1
 **Depends On:** C06 corrective contract
-**Status:** Backlog
+**Status:** Implemented on `codex/c06-c07-corrective`
 
 ## 2. Goal
 
@@ -39,3 +39,12 @@
 **Given** a client reconnects with a last sequence
 **When** it requests JSON replay or SSE
 **Then** events are returned exactly once in increasing sequence order.
+
+## Implementation Evidence
+
+- Migration `0008_c07_run_input_conformance` adds `run_pending_decisions` and persists `RunEvent.decision_id`.
+- `RunRepository.mark_waiting_for_input` and `continue_run` keep one stable run, enforce sequence/ownership, and make identical retries idempotent.
+- `GET /api/v1/runs/{run_id}` exposes a pending decision; `POST /api/v1/runs/{run_id}/input` continues the same run.
+- Waiting runs are excluded from orphan recovery; terminal cancellation closes unresolved decisions.
+- JSON replay and SSE `Last-Event-ID` continue to replay only later sequence numbers.
+- Verification: focused C07 tests `19 passed`; full backend suite `113 passed, 1 warning`; frontend build passed.

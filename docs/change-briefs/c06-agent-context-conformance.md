@@ -7,7 +7,7 @@
 **Reviewer:** zhang（Required Review）
 **Priority:** P0
 **Depends On:** C00 audit, C05 contract conformance
-**Status:** Backlog
+**Status:** Implemented on `codex/c06-c07-corrective`
 
 ## 2. Goal
 
@@ -46,3 +46,11 @@
 **Given** the provider needs a user decision
 **When** it returns a pending result
 **Then** the platform stores a non-terminal `waiting_for_input` state without allowing Promote or Publish.
+
+## Implementation Evidence
+
+- `GameBuildRequest` now carries affected scope, accepted resource provenance, relevant overrides and versioned design/spec/build profiles.
+- `GameBuildResult` and `RunEvent` define the non-terminal `waiting_for_input`/`decision_id` contract; provider events still reject Promote, Publish and Resource Review semantics.
+- `FakeGameAgent` emits deterministic pending decisions for contract tests.
+- Commits: `8513141 feat: close c06 agent context contract` and `f5c0252 feat: persist run input continuation`.
+- Verification: C06 focused tests and the full backend suite pass on the corrective branch.
