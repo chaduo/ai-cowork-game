@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.contracts.game_agent import ContractError, RunEvent
+from app.contracts.game_agent import ContractError, PendingDecision, RunEvent
 from app.main import create_app
 from app.repositories.runs import RunRepository
 from tests.test_c07_run_events import event
@@ -22,6 +22,25 @@ def seed_terminal_run(database_url: str) -> None:
             "run-api-1",
             "succeeded",
             event("run-api-1", 2, kind="completed", progress=1, artifact_ref="dist/index.html"),
+        )
+        session.commit()
+
+
+def seed_waiting_run(database_url: str) -> None:
+    app = create_app(Settings(database_url=database_url))
+    with Session(app.state.engine) as session:
+        repository = RunRepository(session)
+        repository.create_run("run-input-api", "build-input-api")
+        decision = PendingDecision(
+            decision_id="decision-api-1",
+            prompt="选择继续方式",
+            input_type="choice",
+            options=["继续", "调整"],
+        )
+        repository.mark_waiting_for_input(
+            "run-input-api",
+            event("run-input-api", 1, kind="build.needs_input", progress=None, message=decision.prompt, decision_id=decision.decision_id),
+            decision,
         )
         session.commit()
 
@@ -85,3 +104,38 @@ def test_unknown_run_returns_error_envelope(isolated_database) -> None:
 
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "run_not_found"
+
+
+def test_waiting_run_exposes_pending_decision_and_continues_same_run(isolated_database) -> None:
+    seed_waiting_run(str(isolated_database.url))
+    client = client_for(str(isolated_database.url))
+
+    status = client.get("/api/v1/runs/run-input-api")
+    continuation = client.post(
+        "/api/v1/runs/run-input-api/input",
+        json={"decision_id": "decision-api-1", "response": "继续"},
+    )
+
+    assert status.status_code == 200
+    assert status.json()["status"] == "waiting_for_input"
+    assert status.json()["pending_decision"]["decision_id"] == "decision-api-1"
+    assert continuation.status_code == 200
+    assert continuation.json()["run_id"] == "run-input-api"
+    assert continuation.json()["status"] == "running"
+
+
+def test_waiting_run_replays_input_event_over_sse_and_json(isolated_database) -> None:
+    seed_waiting_run(str(isolated_database.url))
+    client = client_for(str(isolated_database.url))
+    client.post(
+        "/api/v1/runs/run-input-api/input",
+        json={"decision_id": "decision-api-1", "response": "继续"},
+    )
+
+    replay = client.get("/api/v1/runs/run-input-api/events", params={"after_sequence": 1})
+    reconnect = client.get("/api/v1/runs/run-input-api/events/stream", headers={"Last-Event-ID": "1"})
+
+    assert [item["sequence"] for item in replay.json()] == [2]
+    assert replay.json()[0]["kind"] == "build.continued"
+    assert "id: 1" not in reconnect.text
+    assert "id: 2" in reconnect.text
