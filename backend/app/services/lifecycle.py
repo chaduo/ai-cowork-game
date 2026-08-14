@@ -40,6 +40,7 @@ class ProjectLifecycleService:
         else:
             design.content_json = json.dumps(content)
             design.status = "submitted"
+            design.confirmed_at = None
         self.session.flush()
         return design
 
