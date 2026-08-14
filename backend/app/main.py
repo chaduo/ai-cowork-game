@@ -8,6 +8,7 @@ from app.config import Settings, get_settings
 from app.errors import ApiError, handle_api_error, handle_unexpected_error, handle_validation_error
 from app.api.projects import router as projects_router
 from app.api.design import router as design_router
+from app.api.runs import router as runs_router
 from app.db import create_engine_for
 
 
@@ -25,6 +26,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_exception_handler(Exception, handle_unexpected_error)
     app.include_router(projects_router)
     app.include_router(design_router)
+    app.include_router(runs_router)
 
     @app.middleware("http")
     async def add_request_id(request: Request, call_next):
