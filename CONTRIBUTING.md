@@ -32,10 +32,10 @@ npm run build
 
 ## Submodule 规则
 
-`test/agent-game-forge` 是独立仓库。修改它时：
+`vendor/opengame` 是 pin 在 commit `c54307e` 的 OpenGame CLI（fork CodingZY/OpenGame）。修改它时：
 
-1. 在 `test/agent-game-forge` 内创建 branch 并完成它自己的测试与提交。
-2. 推送子模块仓库后，在主仓库更新 submodule pointer。
+1. 在 `vendor/opengame` 内创建 branch 并完成它自己的测试与提交。
+2. 推送子模块仓库（CodingZY/OpenGame）后，在主仓库更新 `vendor/opengame` 的 submodule pointer。
 3. 主仓库 PR 中说明对应的子模块 commit 和兼容性影响。
 
 不要把子模块目录转成普通文件夹，也不要在主仓库复制一份 OpenGame 源码。

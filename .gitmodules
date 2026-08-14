@@ -1,5 +1,3 @@
-[submodule "test/agent-game-forge"]
-	path = test/agent-game-forge
-	url = https://github.com/0x0funky/agent-game-forge.git
-	branch = main
-
+[submodule "vendor/opengame"]
+	path = vendor/opengame
+	url = https://github.com/CodingZY/OpenGame.git

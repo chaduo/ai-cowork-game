@@ -92,5 +92,9 @@ malicious generated commands could corrupt trusted history.
 
 ## Open Questions
 
-- The exact pinned OpenGame CLI version and non-interactive argument format will be fixed by the first spike.
+- ~~The exact pinned OpenGame CLI version and non-interactive argument format will be fixed by the first spike.~~ **Resolved by C08 spike (2026-08-14):**
+  - OpenGame = `https://github.com/CodingZY/OpenGame` (fork of leigest519/OpenGame), pinned at commit `c54307e`, `opengame` v0.6.0, attached as a git submodule at `vendor/opengame` (pure pointer; the main repo never copies OpenGame source).
+  - Non-interactive invocation: `opengame -p "<GameSpec prompt>" --yolo --auth-type openai -m <model> -o stream-json`, run with cwd = the run's isolated workspace. Sandbox off locally via `GEMINI_SANDBOX=false`; docker isolation via `-s` / `--sandbox-image` (spec §8). Credentials via `OPENAI_API_KEY` and `OPENAI_BASE_URL` (to `/v1`; the SDK appends `/chat/completions`) or the `--openai-*` flags — never committed.
+  - Output format is `stream-json` (NDJSON, one JSON object per line) with messages `type: system` / `assistant` / `result`; `result` carries `is_error`, `result`, `usage`, `duration_ms`, `num_turns`. `assistant.message.content[]` blocks are `thinking` / `text` / `tool_use` / `tool_result` / `user`. OpenGameAdapter consumes this and normalizes it into the provider-neutral RunEvent (spec §5). Full evidence: `docs/development/c08-opengame-spike/` (version lock, invocation, config, and a real success fixture `success-run.stream.json`).
+  - Repo structure: the previously-attached `test/agent-game-forge` submodule (0x0funky's "Agent Game Forge" daemon IDE) was **removed** — it had been mislabeled as "OpenGame" in README/CONTRIBUTING but is a different project and not the Adapter target. `vendor/opengame` replaces it. This extends the spec §3 four-dir layout (`frontend/backend/game-template/deploy`) with a `vendor/` directory for pinned external tooling.
 - Benchmark idea fixtures may change without changing the runtime or publication contracts.
