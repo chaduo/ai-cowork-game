@@ -102,3 +102,37 @@ def test_retesting_candidate_returns_immutable_report_and_does_not_touch_current
         assert report_count == 1
         assert evidence_count == 5
         assert session.get(Project, project.id).current_playable_version_id == "playable-before-test"
+
+
+def test_repair_links_new_candidate_without_overwriting_failed_parent(isolated_database) -> None:
+    with Session(isolated_database) as session:
+        project = confirmed_project(session)
+        parent = create_candidate(session, project)
+        asyncio.run(CandidateTestService(session, FakeCandidateTestRunner("console_failure")).test_candidate(parent.id))
+        replacement = create_candidate(session, project)
+
+        linked = CandidateTestService(session, FakeCandidateTestRunner("pass")).link_repair_candidate(parent.id, replacement.id)
+        session.commit()
+
+        assert linked.parent_candidate_id == parent.id
+        assert linked.attempt == parent.attempt + 1
+        assert session.get(BuildCandidate, parent.id).parent_candidate_id is None
+        assert session.get(BuildCandidate, parent.id).test_gate_status == "failed"
+
+
+def test_repair_rejects_successful_parent_cross_project_and_tested_replacement(isolated_database) -> None:
+    with Session(isolated_database) as session:
+        first_project = confirmed_project(session)
+        second_project = confirmed_project(session)
+        successful_parent = create_candidate(session, first_project)
+        cross_project = create_candidate(session, second_project)
+        tested_replacement = create_candidate(session, first_project)
+        asyncio.run(CandidateTestService(session, FakeCandidateTestRunner("pass")).test_candidate(tested_replacement.id))
+        service = CandidateTestService(session, FakeCandidateTestRunner("pass"))
+
+        with pytest.raises(ValueError, match="failed or invalid"):
+            service.link_repair_candidate(successful_parent.id, cross_project.id)
+        failed_parent = create_candidate(session, first_project)
+        asyncio.run(CandidateTestService(session, FakeCandidateTestRunner("console_failure")).test_candidate(failed_parent.id))
+        with pytest.raises(ValueError, match="already linked or tested"):
+            service.link_repair_candidate(failed_parent.id, tested_replacement.id)
