@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ArrowLeft, ArrowRight, Check, ChevronRight, FileCode2, Gamepad2, Hammer, Image, LoaderCircle, MonitorPlay, ScrollText, SlidersHorizontal } from 'lucide-vue-next'
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AssetGalleryReadOnly from '../components/workspace/AssetGalleryReadOnly.vue'
 import ArtifactEmptyState from '../components/workspace/ArtifactEmptyState.vue'
 import BuildCoworkPanel from '../components/workspace/BuildCoworkPanel.vue'
@@ -21,6 +21,8 @@ import type { BuildPhase } from '../components/workspace/buildTypes'
 import type { ChangePhase, ChangeSource } from '../components/workspace/changeTypes'
 import type { ReleaseDraft, ReleasePhase, ReleaseRecord } from '../components/workspace/releaseTypes'
 import type { ArtifactTab, SpecContext } from '../components/workspace/workspaceTypes'
+import { ApiClientError, confirmProjectGameSpec, getProjectDesign, getProjectGameSpec, saveProjectGameSpec } from '../api/client'
+import { creatorGameSpecFromViewModel, gameSpecViewModelFromCreator } from '../contracts/creatorGameSpecMapping'
 import {
   applyControlledChange as applyProjectControlledChange,
   applySpecRevision,
@@ -31,7 +33,6 @@ import {
   requestSpecConfirmation,
   requestSpecRevision,
   retryBuild,
-  cancelBuild,
   retryScopeViolation as retryProjectScopeViolation,
   cancelRelationshipResource as cancelProjectRelationshipResource,
   dismissResourceRecommendation,
@@ -46,6 +47,8 @@ import {
   startGeneration,
   refreshResourceMatches,
   projectStore,
+  setProjectDesignStatus,
+  setProjectGameSpecState,
   useRelationshipResource as useProjectRelationshipResource,
   updateReleaseDraft,
 } from '../stores/projectStore'
@@ -72,6 +75,9 @@ const playable = computed(() => getCurrentPlayable(session))
 const playableVersion = computed(() => playable.value?.version ?? 0)
 const currentRelease = computed<ReleaseRecord | null>(() => getCurrentRelease(session))
 const releaseDraft = session.releaseDraft
+const gamespecError = ref<string | null>(null)
+const gamespecLoading = ref(false)
+let gamespecSaveInFlight = false
 
 function createReleaseDraft(): ReleaseDraft {
   return createReleaseDraftForProject(session.id) ?? session.releaseDraft
@@ -126,7 +132,8 @@ const changePhases: ChangePhase[] = [
   'validation_complete_change', 'playable_v2_ready', 'version_history',
 ]
 
-const isBuildMode = computed(() => buildPhases.includes(phase.value as BuildPhase))
+const isBuildMode = computed(() => phase.value === 'spec_confirmed' || buildPhases.includes(phase.value as BuildPhase))
+const isBuildTimelineMode = computed(() => buildPhases.includes(phase.value as BuildPhase))
 const isChangeMode = computed(() => changePhases.includes(phase.value as ChangePhase))
 const tabs = computed(() => isChangeMode.value ? changeTabs : isBuildMode.value ? buildTabs : specTabs)
 const emptyArtifactTab = computed<Exclude<ArtifactTab, 'gamespec' | 'build' | 'change'>>(() => {
@@ -141,7 +148,8 @@ const generationSteps = computed(() => [
 ])
 
 watch(phase, (nextPhase) => {
-  if (previewPhases.includes(nextPhase) || nextPhase === 'scope_violation') activeTab.value = 'preview'
+  if (nextPhase === 'spec_confirmed') activeTab.value = 'build'
+  else if (previewPhases.includes(nextPhase) || nextPhase === 'scope_violation') activeTab.value = 'preview'
 })
 
 function useRelationshipResource() {
@@ -175,24 +183,63 @@ function askForRevision(text: string) {
 function applyRevision() {
   applySpecRevision(session.id)
   selectedContext.value = null
+  void persistGameSpecDraft()
 }
 
 function requestConfirmation() {
   requestSpecConfirmation(session.id)
 }
 
-function confirmGameSpec() {
-  activeTab.value = 'build'
-  confirmSpecAndStartBuild(session.id)
+async function persistGameSpecDraft() {
+  if (session.designStatus !== 'confirmed' || gamespecSaveInFlight) return true
+  gamespecSaveInFlight = true
+  gamespecError.value = null
+  try {
+    const response = await saveProjectGameSpec(session.id, creatorGameSpecFromViewModel(spec))
+    setProjectGameSpecState(session.id, {
+      status: response.status,
+      revisionId: response.revision_id,
+      spec: response.spec,
+    })
+    return true
+  } catch (cause) {
+    if (!(cause instanceof ApiClientError && cause.code === 'project_not_found')) {
+      gamespecError.value = cause instanceof ApiClientError ? cause.message : '暂时无法保存 GameSpec，请稍后重试。'
+    }
+    return false
+  } finally {
+    gamespecSaveInFlight = false
+  }
+}
+
+async function confirmGameSpec() {
+  if (session.designStatus !== 'confirmed') {
+    activeTab.value = 'build'
+    confirmSpecAndStartBuild(session.id)
+    return
+  }
+  const saved = await persistGameSpecDraft()
+  if (!saved) {
+    setWorkspacePhase(session.id, 'review')
+    return
+  }
+  try {
+    const response = await confirmProjectGameSpec(session.id)
+    setProjectGameSpecState(session.id, {
+      status: response.status,
+      revisionId: response.revision_id,
+      spec: response.spec,
+    })
+    activeTab.value = 'build'
+    confirmSpecAndStartBuild(session.id)
+  } catch (cause) {
+    gamespecError.value = cause instanceof ApiClientError ? cause.message : 'GameSpec 确认失败，请检查后重试。'
+    setWorkspacePhase(session.id, 'review')
+  }
 }
 
 function retryBuildStage() {
   retryBuild(session.id)
-}
-
-function cancelBuildStage() {
-  cancelBuild(session.id)
-  activeTab.value = 'gamespec'
 }
 
 function requestChange(source: ChangeSource, request?: string) {
@@ -281,7 +328,47 @@ function restoreVersion(version: number) {
   }
 }
 
+
 refreshResourceMatches(session.id)
+
+onMounted(async () => {
+  gamespecLoading.value = true
+  try {
+    const designResponse = await getProjectDesign(session.id)
+    setProjectDesignStatus(session.id, designResponse.status)
+    if (designResponse.status === 'confirmed') {
+      try {
+        const response = await getProjectGameSpec(session.id)
+        Object.assign(session.spec, gameSpecViewModelFromCreator(response.spec, session.spec))
+        setProjectGameSpecState(session.id, {
+          status: response.status,
+          revisionId: response.revision_id,
+          spec: response.spec,
+        })
+        if (response.status === 'confirmed') {
+          if (getCurrentPlayable(session)) setWorkspacePhase(session.id, 'playable_ready')
+          else confirmSpecAndStartBuild(session.id)
+        }
+      } catch (cause) {
+        if (!(cause instanceof ApiClientError && cause.code === 'gamespec_not_found')) {
+          gamespecError.value = cause instanceof ApiClientError ? cause.message : '暂时无法读取 GameSpec。'
+        }
+      }
+    }
+  } catch (cause) {
+    if (!(cause instanceof ApiClientError && cause.code === 'project_not_found')) {
+      gamespecError.value = cause instanceof ApiClientError ? cause.message : '暂时无法读取设计状态。'
+    }
+  } finally {
+    gamespecLoading.value = false
+  }
+})
+
+watch(phase, (nextPhase) => {
+  if (nextPhase === 'review' && session.designStatus === 'confirmed' && session.gamespecStatus === 'missing') {
+    void persistGameSpecDraft()
+  }
+})
 onBeforeUnmount(() => {
   if (reuseFeedbackTimer !== null) window.clearTimeout(reuseFeedbackTimer)
 })
@@ -306,7 +393,7 @@ onBeforeUnmount(() => {
           @continue-playing="setWorkspacePhase(session.id, 'playing_v1')"
           @show-recommendations="setWorkspacePhase(session.id, 'showing_recommendations')"
     />
-    <BuildCoworkPanel v-else-if="isBuildMode" :phase="phase as BuildPhase" />
+    <BuildCoworkPanel v-else-if="isBuildTimelineMode" :phase="phase as BuildPhase" />
     <CoworkPanel
       v-else
       :phase="phase"
@@ -335,12 +422,15 @@ onBeforeUnmount(() => {
           @retry-scope="retryScopeViolation"
         />
 
-        <BuildWorkspaceView
-          v-else-if="activeTab === 'build' && isBuildMode"
-          :phase="phase as BuildPhase"
-          @retry="retryBuildStage"
-          @cancel="cancelBuildStage"
-        />
+        <section v-else-if="activeTab === 'build' && phase === 'spec_confirmed'" class="spec-confirmed-state">
+          <span class="confirmed-icon"><LoaderCircle :size="26" class="spin" /></span>
+          <span>BUILD STARTING</span>
+          <h2>正在准备第一个 Working Build…</h2>
+          <p>GameSpec 已确认。接下来会按 First Playable 范围构建并验证核心玩法。</p>
+          <div class="build-start-line"><span>DESIGN</span><ChevronRight :size="13" /><span>GAMESPEC</span><ChevronRight :size="13" /><strong>BUILD</strong></div>
+        </section>
+
+        <BuildWorkspaceView v-else-if="activeTab === 'build' && isBuildTimelineMode" :phase="phase as BuildPhase" @retry="retryBuildStage" />
 
         <section v-else-if="activeTab === 'gamespec' && (phase === 'generating' || phase === 'generation_error')" class="spec-generating">
           <span>GAME SPEC</span>
@@ -395,6 +485,9 @@ onBeforeUnmount(() => {
         <CodeReadOnlyState v-else-if="activeTab === 'code' && (isBuildMode || isChangeMode)" :project-title="playable?.snapshot.projectTitle ?? session.spec.title" />
         <ArtifactEmptyState v-else :tab="emptyArtifactTab" />
       </div>
+
+      <p v-if="gamespecLoading" class="gamespec-api-status" aria-live="polite">正在读取已保存的 GameSpec…</p>
+      <p v-if="gamespecError" class="gamespec-api-error" role="alert">{{ gamespecError }}</p>
 
       <footer v-if="activeTab === 'gamespec' && (phase === 'review' || phase === 'revising')" class="gamespec-gate">
         <div><Check :size="14" /><span><strong>GameSpec 已准备好</strong><small>当前 Draft 将成为第一个 Build 的输入基线</small></span></div>

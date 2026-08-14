@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import {
   ArrowDown,
   ArrowRight,
@@ -13,9 +13,18 @@ import CreativeKickoffModal from '../components/kickoff/CreativeKickoffModal.vue
 import type { ConfirmedGameDesign } from '../components/kickoff/kickoffTypes'
 import type { ProjectSession } from '../stores/projectStore'
 import { runtimeConfig } from '../stores/projectStore'
+import { ApiClientError, confirmProjectDesign, createProjectRecord, getProjectDesign, saveProjectDesign } from '../api/client'
+import type { ProjectResponse } from '../api/client'
+import type { CreatorGameDesignDraft } from '../contracts/creatorGameDesign'
 
-const props = defineProps<{ projects: ProjectSession[] }>()
-const emit = defineEmits<{ enterWorkspace: [design: ConfirmedGameDesign]; openProject: [projectId: string]; resources: [] }>()
+const props = defineProps<{
+  projects: ProjectSession[]
+  remoteProjects?: ProjectResponse[] | null
+  resumeProjectId?: string | null
+  projectsLoading?: boolean
+  projectListError?: string | null
+}>()
+const emit = defineEmits<{ enterWorkspace: [design: ConfirmedGameDesign, projectId: string]; openProject: [projectId: string]; resumeConsumed: []; resources: [] }>()
 
 type GameTemplate = {
   id: string
@@ -73,6 +82,9 @@ const templateFlash = ref(false)
 const kickoffStarted = ref(false)
 const kickoffOpen = ref(false)
 const kickoffIdea = ref('')
+const kickoffDraft = ref<CreatorGameDesignDraft | null>(null)
+const backendProjectId = ref<string | null>(null)
+const idempotencyKey = ref<string | null>(null)
 const creatorRef = ref<HTMLElement | null>(null)
 const templateSectionRef = ref<HTMLElement | null>(null)
 const ideaInputRef = ref<HTMLTextAreaElement | null>(null)
@@ -83,13 +95,75 @@ const selectedTemplate = computed(() =>
   templates.find((template) => template.id === selectedTemplateId.value) ?? null,
 )
 const canCreate = computed(() => idea.value.trim().length > 0)
-const projects = computed(() => [...props.projects].sort((left, right) => right.updatedAt - left.updatedAt))
+type ProjectListItem = {
+  id: string
+  name: string
+  updatedAt: number
+  stage: string
+}
+
+const stageLabels: Record<string, string> = {
+  design_draft: 'Game Design',
+  design_review: 'Game Design 待确认',
+  gamespec_review: 'GameSpec 待确认',
+  ready_to_build: '准备构建',
+  building: '正在构建',
+  candidate_review: '候选版本待确认',
+  playable: '可试玩',
+  published: '已发布',
+  archived: '已归档',
+}
+
+const projects = computed<ProjectListItem[]>(() => {
+  const remoteById = new Map((props.remoteProjects ?? []).map((project) => [project.id, project]))
+  const local = props.projects.map((project) => {
+    const remote = remoteById.get(project.id)
+    return {
+      id: project.id,
+      name: remote?.name ?? project.design.projectTitle,
+      updatedAt: remote ? Math.max(Date.parse(remote.updated_at), project.updatedAt) : project.updatedAt,
+      stage: project.playableVersions.length > 0 || project.releases.length > 0
+        ? projectStage(project)
+        : remote?.stage ?? projectStage(project),
+    }
+  })
+  const localIds = new Set(local.map((project) => project.id))
+  const remoteOnly = (props.remoteProjects ?? [])
+    .filter((project) => !localIds.has(project.id))
+    .map((project) => ({ id: project.id, name: project.name, updatedAt: Date.parse(project.updated_at), stage: project.stage }))
+  return [...local, ...remoteOnly].sort((left, right) => right.updatedAt - left.updatedAt)
+})
+
+watch(
+  () => props.resumeProjectId,
+  async (projectId) => {
+    if (!projectId) return
+    const record = (props.remoteProjects ?? []).find((project) => project.id === projectId)
+    if (!record) return
+    error.value = null
+    backendProjectId.value = projectId
+    kickoffIdea.value = record.original_idea
+    idea.value = record.original_idea
+    try {
+      kickoffDraft.value = (await getProjectDesign(projectId)).draft
+      kickoffStarted.value = true
+      kickoffOpen.value = true
+      emit('resumeConsumed')
+    } catch (cause) {
+      error.value = cause instanceof ApiClientError ? cause.message : '暂时无法恢复这次设计澄清。'
+    }
+  },
+)
 
 function projectStage(project: ProjectSession): string {
-  if (project.releases.length > 0) return 'Released'
-  if (project.playableVersions.length > 0) return 'Playable'
-  if (project.phase.includes('build') || project.phase.includes('change')) return 'Building'
-  return 'GameSpec'
+  if (project.releases.length > 0) return 'published'
+  if (project.playableVersions.length > 0) return 'playable'
+  if (project.phase.includes('build') || project.phase.includes('change')) return 'building'
+  return 'gamespec_review'
+}
+
+function displayStage(stage: string): string {
+  return stageLabels[stage] ?? stage
 }
 
 function relativeUpdatedAt(updatedAt: number): string {
@@ -133,13 +207,35 @@ async function createProject() {
   if (kickoffStarted.value && nextIdea !== kickoffIdea.value) {
     kickoffOpen.value = false
     kickoffStarted.value = false
+    backendProjectId.value = null
+    idempotencyKey.value = null
+    kickoffDraft.value = null
     await nextTick()
   }
   if (!kickoffStarted.value) {
     kickoffIdea.value = nextIdea
+    idempotencyKey.value = crypto.randomUUID()
+    try {
+      const created = await createProjectRecord({ name: nextIdea.slice(0, 80), originalIdea: nextIdea }, idempotencyKey.value)
+      backendProjectId.value = created.id
+      kickoffDraft.value = (await getProjectDesign(created.id)).draft
+    } catch (cause) {
+      error.value = cause instanceof ApiClientError ? cause.message : '暂时无法保存这个想法，请确认后端已启动。'
+      return
+    }
     kickoffStarted.value = true
   }
   kickoffOpen.value = true
+}
+
+async function saveKickoffDraft(draft: CreatorGameDesignDraft) {
+  kickoffDraft.value = draft
+  if (!backendProjectId.value) return
+  try {
+    await saveProjectDesign(backendProjectId.value, draft)
+  } catch (cause) {
+    error.value = cause instanceof ApiClientError ? cause.message : '暂时无法保存这次澄清，请稍后重试。'
+  }
 }
 
 async function closeKickoff() {
@@ -149,7 +245,16 @@ async function closeKickoff() {
 }
 
 function enterWorkspace(design: ConfirmedGameDesign) {
-  window.setTimeout(() => emit('enterWorkspace', design), 900)
+  if (!backendProjectId.value) return
+  window.setTimeout(async () => {
+    try {
+      await confirmProjectDesign(backendProjectId.value!)
+      emit('enterWorkspace', design, backendProjectId.value!)
+    } catch (cause) {
+      error.value = cause instanceof ApiClientError ? cause.message : '设计确认失败，请稍后重试。'
+      kickoffOpen.value = false
+    }
+  }, 900)
 }
 
 function onIdeaKeydown(event: KeyboardEvent) {
@@ -171,16 +276,32 @@ function onIdeaKeydown(event: KeyboardEvent) {
     </header>
 
     <main>
-      <section v-if="projects.length" class="project-list" aria-labelledby="project-list-title">
+      <section v-if="projectsLoading" class="project-list project-list-state" aria-live="polite">
+        <span class="project-list-state-kicker">PROJECTS</span>
+        <strong>正在加载你的项目…</strong>
+      </section>
+
+      <section v-else-if="projectListError" class="project-list project-list-state" role="alert">
+        <span class="project-list-state-kicker">PROJECTS</span>
+        <strong>{{ projectListError }}</strong>
+      </section>
+
+      <section v-else-if="projects.length" class="project-list" aria-labelledby="project-list-title">
         <div class="project-list-heading"><div><span>MY PROJECTS</span><h2 id="project-list-title">我的项目</h2></div><strong>{{ projects.length }}</strong></div>
         <div class="project-list-items">
           <button v-for="project in projects" :key="project.id" class="project-list-item" type="button" @click="$emit('openProject', project.id)">
             <span class="project-list-icon"><Gamepad2 :size="17" /></span>
-            <span class="project-list-copy"><strong>{{ project.design.projectTitle }}</strong><small>{{ relativeUpdatedAt(project.updatedAt) }}</small></span>
-            <span class="project-list-stage">{{ projectStage(project) }}</span>
+            <span class="project-list-copy"><strong>{{ project.name }}</strong><small>{{ relativeUpdatedAt(project.updatedAt) }}</small></span>
+            <span class="project-list-stage">{{ displayStage(project.stage) }}</span>
             <ArrowRight :size="16" />
           </button>
         </div>
+      </section>
+
+      <section v-else class="project-list project-list-state" aria-live="polite">
+        <span class="project-list-state-kicker">MY PROJECTS</span>
+        <strong>还没有项目</strong>
+        <small>从下面写下一个想法，开始你的第一个游戏。</small>
       </section>
 
       <section id="creator" ref="creatorRef" class="creator-hero" aria-labelledby="creator-title">
@@ -275,7 +396,9 @@ function onIdeaKeydown(event: KeyboardEvent) {
       :original-idea="kickoffIdea"
       :template-id="selectedTemplateId"
       :force-mock-error="forceMockError"
+      :initial-draft="kickoffDraft"
       @close="closeKickoff"
+      @draft-updated="saveKickoffDraft"
       @confirmed="enterWorkspace"
     />
   </div>

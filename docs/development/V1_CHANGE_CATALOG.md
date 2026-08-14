@@ -433,6 +433,14 @@ RunEvent:
 - terminal state 与 DB 一致；不虚构 provider 未确认的成功。
 - `waiting_for_input` 不是 terminal；刷新/重连后保留 pending decision，不能创建新 run。
 
+**C07 implementation boundary (2026-08-14)**
+
+- `RunRepository` owns idempotent run creation, exact event sequence, sanitization, terminal transitions,
+  cancellation requests, and orphan recovery.
+- REST status, JSON replay, SSE replay/reconnect, and cancellation are exposed under `/api/v1/runs`.
+- C11 remains responsible for connecting BuildService/GameAgent execution to these repository methods; C07 does
+  not parse OpenGame logs, create Candidates, or promote Versions.
+
 ### C08 — `opengame-cli-spike`
 
 **Goal**
@@ -518,6 +526,13 @@ output: stdout, stderr, exit_code, process_status, duration
 - 后端重启不会让 run 永久卡在 running。
 - Accepted SavedResource 必须进入 immutable build input 和 Candidate provenance，不能只存在于 UI workflow state。
 
+**C11 implementation evidence (2026-08-14)**
+
+- `BuildService` persists the confirmed GameSpec revision, baseline playable pointer, operation and request text before invoking the C06 `GameAgent` contract.
+- `FakeGameAgent` is the deterministic provider used by the C11 service/API tests; no OpenGame subprocess or log parser is included.
+- Stable `build_id`/`run_id`, single-active-build guard, retry ancestry, cancellation, terminal diagnostics and orphan recovery are covered by `backend/tests/test_c11_build_orchestration.py` and `backend/tests/test_c11_build_api.py`.
+- Success creates a `BuildCandidate` only; no code in C11 changes `Project.current_playable_version_id`, creates a `PlayableVersion`, or publishes a `Release`.
+
 ### C12 — `candidate-test-gate`
 
 **Goal**
@@ -538,6 +553,14 @@ output: stdout, stderr, exit_code, process_status, duration
 - repair 创建新 Candidate attempt，不覆盖旧失败记录。
 - 测试失败不影响 current Playable。
 - runtime 自报 PASS、缺失 test hook 或 Human Play Review 未接受都不能 Promote。
+
+**C12 implementation evidence (2026-08-14)**
+
+- `TestReport` and immutable `TestEvidence` records are persisted by migration `0006_candidate_test_gate`; BuildCandidate stores `test_gate_status`, `parent_candidate_id`, and `attempt`.
+- `CandidateTestService` computes the authoritative platform verdict from required browser, console, input, gameplay and completion evidence. Runtime PASS alone cannot produce `ready`.
+- Deterministic `FakeCandidateTestRunner` covers pass, missing evidence, contradiction, console failure, completion failure and runtime-only PASS without adding Playwright or OpenGame runtime dependencies.
+- Repair links a new C11 retry Candidate to a failed/invalid parent without overwriting the parent; C12 never changes `current_playable_version_id`, creates PlayableVersion, publishes Release, or adds Workspace UI.
+- C12 service/API tests cover 10 gate/repair cases and 4 API cases; full backend regression is recorded in the verification artifact.
 
 ### C13 — `runtime-workspace-isolation`
 

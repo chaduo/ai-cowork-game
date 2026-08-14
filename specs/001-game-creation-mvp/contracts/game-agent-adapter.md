@@ -43,6 +43,33 @@ class GameAgentAdapter(Protocol):
 或供应商异常。`resume_from_version` 只接收平台准备好的成功 Version 工作区，不表示续接供应商
 session 或阶段检查点。
 
+## C06 V1 BuildService contract (source of truth)
+
+C06 freezes the smaller provider-neutral contract consumed by the V1 BuildService. The Python models in
+`backend/app/contracts/game_agent.py` are the implementation source of truth; the higher-level methods above
+are future runtime capabilities and must map to this boundary rather than become a second BuildService API.
+
+```python
+class GameAgent(Protocol):
+    async def start(self, request: GameBuildRequest) -> AgentRunHandle: ...
+    def stream_events(self, handle: AgentRunHandle, after_sequence: int = 0) -> AsyncIterator[RunEvent]: ...
+    async def result(self, handle: AgentRunHandle) -> GameBuildResult: ...
+    async def cancel(self, handle: AgentRunHandle) -> None: ...
+```
+
+`GameBuildRequest` contains `project_id`, `build_id`, `operation`, validated `creator_game_spec`, mapped
+`runtime_build_spec`, an approved `workspace`, optional `baseline_playable`, and `request_text`.
+`GameBuildResult.status` is one of `succeeded`, `failed`, `cancelled`, `timed_out`, `invalid_output`, or
+`unsupported`; non-success results carry a structured error. `RunEvent` has `run_id`, monotonic `sequence`,
+`stage`, `kind`, sanitized `message`, optional `progress`, `artifact_ref`, structured `error`, and UTC
+`timestamp`. Provider events cannot use gate-equivalent kinds such as `promoted`, `published`, or
+`resource_saved`.
+
+The shared contract suite is defined in `backend/tests/contract_suites/test_game_agent_contract_suite.py`.
+C06 runs it with `FakeGameAgent`; C10 must run the same assertions with `OpenGameAdapter`, and future Claude
+SDK or piagent adapters must do likewise. The suite does not grant any adapter permission to Promote, Publish,
+save resources, or mutate Project state.
+
 ## 通用命令上下文
 
 | 字段 | 含义 |

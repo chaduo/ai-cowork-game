@@ -1,10 +1,22 @@
+from contextlib import asynccontextmanager
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from sqlalchemy import text
 
 from app.config import Settings, get_settings
 from app.errors import ApiError, handle_api_error, handle_unexpected_error, handle_validation_error
+from app.api.projects import router as projects_router
+from app.api.design import router as design_router
+from app.api.runs import router as runs_router
+from app.api.builds import router as builds_router
+from app.api.candidates import router as candidates_router
+from app.agents.fake_game_agent import FakeGameAgent
+from app.agents.fake_candidate_test_runner import FakeCandidateTestRunner
+from app.services.builds import BuildService
+from sqlalchemy.orm import Session
+from app.db import create_engine_for
 
 
 SERVICE_NAME = "ai-cowork-game-api"
@@ -13,11 +25,28 @@ APPLICATION_VERSION = "0.1.0"
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
-    app = FastAPI(title="AI Cowork Game API", version=APPLICATION_VERSION)
+
+    @asynccontextmanager
+    async def lifespan(application: FastAPI):
+        with Session(application.state.engine) as session:
+            recovered = BuildService(session, application.state.game_agent).recover_orphaned_jobs()
+            if recovered:
+                session.commit()
+        yield
+
+    app = FastAPI(title="AI Cowork Game API", version=APPLICATION_VERSION, lifespan=lifespan)
     app.state.settings = settings
+    app.state.engine = create_engine_for(settings)
+    app.state.game_agent = FakeGameAgent()
+    app.state.candidate_test_runner = FakeCandidateTestRunner("pass")
     app.add_exception_handler(ApiError, handle_api_error)
     app.add_exception_handler(RequestValidationError, handle_validation_error)
     app.add_exception_handler(Exception, handle_unexpected_error)
+    app.include_router(projects_router)
+    app.include_router(design_router)
+    app.include_router(runs_router)
+    app.include_router(builds_router)
+    app.include_router(candidates_router)
 
     @app.middleware("http")
     async def add_request_id(request: Request, call_next):
@@ -27,7 +56,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return response
 
     @app.get("/healthz")
-    def healthz() -> dict[str, str]:
+    def healthz(request: Request) -> dict[str, str]:
+        try:
+            with request.app.state.engine.connect() as connection:
+                connection.execute(text("SELECT 1"))
+        except Exception as cause:
+            raise ApiError("dependency_unavailable", "Database unavailable", [], 503) from cause
         return {
             "status": "ok",
             "service": SERVICE_NAME,
