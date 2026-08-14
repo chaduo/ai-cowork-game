@@ -132,7 +132,8 @@ const changePhases: ChangePhase[] = [
   'validation_complete_change', 'playable_v2_ready', 'version_history',
 ]
 
-const isBuildMode = computed(() => buildPhases.includes(phase.value as BuildPhase))
+const isBuildMode = computed(() => phase.value === 'spec_confirmed' || buildPhases.includes(phase.value as BuildPhase))
+const isBuildTimelineMode = computed(() => buildPhases.includes(phase.value as BuildPhase))
 const isChangeMode = computed(() => changePhases.includes(phase.value as ChangePhase))
 const tabs = computed(() => isChangeMode.value ? changeTabs : isBuildMode.value ? buildTabs : specTabs)
 const emptyArtifactTab = computed<Exclude<ArtifactTab, 'gamespec' | 'build' | 'change'>>(() => {
@@ -147,7 +148,8 @@ const generationSteps = computed(() => [
 ])
 
 watch(phase, (nextPhase) => {
-  if (previewPhases.includes(nextPhase) || nextPhase === 'scope_violation') activeTab.value = 'preview'
+  if (nextPhase === 'spec_confirmed' || isBuildTimelineMode.value) activeTab.value = 'build'
+  else if (previewPhases.includes(nextPhase) || nextPhase === 'scope_violation') activeTab.value = 'preview'
 })
 
 function useRelationshipResource() {
@@ -386,7 +388,7 @@ onBeforeUnmount(() => {
           @continue-playing="setWorkspacePhase(session.id, 'playing_v1')"
           @show-recommendations="setWorkspacePhase(session.id, 'showing_recommendations')"
     />
-    <BuildCoworkPanel v-else-if="isBuildMode" :phase="phase as BuildPhase" />
+    <BuildCoworkPanel v-else-if="isBuildTimelineMode" :phase="phase as BuildPhase" />
     <CoworkPanel
       v-else
       :phase="phase"
@@ -415,7 +417,15 @@ onBeforeUnmount(() => {
           @retry-scope="retryScopeViolation"
         />
 
-        <BuildWorkspaceView v-else-if="activeTab === 'build' && isBuildMode" :phase="phase as BuildPhase" @retry="retryBuildStage" />
+        <section v-else-if="activeTab === 'build' && phase === 'spec_confirmed'" class="spec-confirmed-state">
+          <span class="confirmed-icon"><LoaderCircle :size="26" class="spin" /></span>
+          <span>BUILD STARTING</span>
+          <h2>正在准备第一个 Working Build…</h2>
+          <p>GameSpec 已确认。接下来会按 First Playable 范围构建并验证核心玩法。</p>
+          <div class="build-start-line"><span>DESIGN</span><ChevronRight :size="13" /><span>GAMESPEC</span><ChevronRight :size="13" /><strong>BUILD</strong></div>
+        </section>
+
+        <BuildWorkspaceView v-else-if="activeTab === 'build' && isBuildTimelineMode" :phase="phase as BuildPhase" @retry="retryBuildStage" />
 
         <section v-else-if="activeTab === 'gamespec' && (phase === 'generating' || phase === 'generation_error')" class="spec-generating">
           <span>GAME SPEC</span>

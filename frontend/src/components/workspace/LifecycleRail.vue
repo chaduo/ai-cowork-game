@@ -7,6 +7,7 @@ const props = defineProps<{ phase: WorkspacePhase }>()
 
 const stages = computed(() => {
   const buildPhases: WorkspacePhase[] = [
+    'spec_confirmed',
     'build_starting', 'building_foundation', 'building_core', 'building_interaction',
     'building_presentation', 'building_progression', 'validating', 'auto_fixing',
     'validating_complete', 'build_error', 'playable_ready',
