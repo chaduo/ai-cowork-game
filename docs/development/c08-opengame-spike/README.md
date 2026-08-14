@@ -165,7 +165,7 @@ export GEMINI_SANDBOX=false
 
 stream-json 实测事件：1 `system` + 45 `assistant`（16 thinking / 12 text / 20 tool_use / 20 tool_result）+ 1 `result`(success)。`assistant.message.content[]` block 类型 = thinking/text/tool_use/tool_result/user。
 
-**仍待补**：failure / cancel / invalid-output / timeout fixtures（见 `success-fixture-README.md` 末尾）。
+**已补齐 ✅**：failure / cancel / invalid-output / timeout 四份 fixtures 已采集（真实 opengame run，详见 `success-fixture-README.md` 末尾"补充 fixtures"段）。关键发现：opengame 把 provider 错误包成 `is_error:false`（`is_error` 不可信）；success 不保证有 artifact；timeout/cancel 在 stream-json 层无终结事件，`timed_out` vs `cancelled` 须靠 Executor 层触发原因区分。
 
 ### 本地复跑方式（key 走环境变量，绝不落盘/提交）
 
