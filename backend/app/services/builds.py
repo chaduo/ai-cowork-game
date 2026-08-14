@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.agents.game_agent import GameAgent
 from app.contracts.game_agent import AgentRunHandle, ContractError, GameBuildRequest, GameBuildResult, RunEvent, WorkspaceRef
 from app.models import Build, GameDesign, Project, Run
-from app.repositories.runs import RUN_ACTIVE_STATUSES, RunRepository
+from app.repositories.runs import RUN_ACTIVE_STATUSES, RUN_EXECUTION_STATUSES, RunRepository
 from app.services.lifecycle import ProjectLifecycleService
 
 
@@ -89,7 +89,9 @@ class BuildService:
 
     async def execute_build(self, build_id: str) -> GameBuildResult:
         build, run = self._job_records(build_id)
-        if run.status not in RUN_ACTIVE_STATUSES:
+        if run.status == "waiting_for_input":
+            return self._waiting_result(build, run)
+        if run.status not in RUN_EXECUTION_STATUSES:
             return self._result_from_records(build, run)
         request = self._request_for(build, run)
         try:
@@ -142,13 +144,22 @@ class BuildService:
 
     async def _consume_agent(self, build: Build, run: Run, handle: AgentRunHandle) -> GameBuildResult:
         terminal: RunEvent | None = None
+        pending_event: RunEvent | None = None
         async for event in self.agent.stream_events(handle, after_sequence=0):
             normalized = event.model_copy(update={"run_id": run.id, "sequence": run.last_sequence + 1})
             if normalized.kind in TERMINAL_EVENT_KINDS:
                 terminal = normalized
+            elif normalized.kind in {"build.needs_input", "build_needs_input", "needs_input", "waiting_for_input"}:
+                pending_event = normalized
             else:
                 self.runs.append_event(normalized)
         result = await self.agent.result(handle)
+        if result.status == "waiting_for_input":
+            if pending_event is None or result.pending_decision is None:
+                raise ValueError("waiting_for_input result is missing its pending decision event")
+            self.runs.mark_waiting_for_input(run.id, pending_event, result.pending_decision)
+            self.session.flush()
+            return result
         return self._persist_result(build, run, result, terminal)
 
     def _persist_result(
@@ -158,6 +169,8 @@ class BuildService:
         result: GameBuildResult,
         provider_terminal: RunEvent | None,
     ) -> GameBuildResult:
+        if result.status == "waiting_for_input":
+            raise ValueError("waiting_for_input must be persisted with its pending decision event")
         now = datetime.now(timezone.utc)
         terminal = provider_terminal or RunEvent(
             run_id=run.id,
@@ -204,4 +217,18 @@ class BuildService:
             status=status,
             metadata={"build_id": build.id},
             error=ContractError(code=run.failure_code or "build_not_active", message=run.failure_message or "Build is not active"),
+        )
+
+    def _waiting_result(self, build: Build, run: Run) -> GameBuildResult:
+        pending = self.runs.get_pending_decision(run.id)
+        if pending is None:
+            return GameBuildResult(
+                status="failed",
+                metadata={"build_id": build.id},
+                error=ContractError(code="missing_pending_decision", message="Waiting run has no pending decision"),
+            )
+        return GameBuildResult(
+            status="waiting_for_input",
+            metadata={"build_id": build.id},
+            pending_decision=pending,
         )
