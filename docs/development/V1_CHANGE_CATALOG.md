@@ -537,6 +537,14 @@ output: stdout, stderr, exit_code, process_status, duration
 - repair 创建新 Candidate attempt，不覆盖旧失败记录。
 - 测试失败不影响 current Playable。
 
+**C12 implementation evidence (2026-08-14)**
+
+- `TestReport` and immutable `TestEvidence` records are persisted by migration `0006_candidate_test_gate`; BuildCandidate stores `test_gate_status`, `parent_candidate_id`, and `attempt`.
+- `CandidateTestService` computes the authoritative platform verdict from required browser, console, input, gameplay and completion evidence. Runtime PASS alone cannot produce `ready`.
+- Deterministic `FakeCandidateTestRunner` covers pass, missing evidence, contradiction, console failure, completion failure and runtime-only PASS without adding Playwright or OpenGame runtime dependencies.
+- Repair links a new C11 retry Candidate to a failed/invalid parent without overwriting the parent; C12 never changes `current_playable_version_id`, creates PlayableVersion, publishes Release, or adds Workspace UI.
+- C12 service/API tests cover 10 gate/repair cases and 4 API cases; full backend regression is recorded in the verification artifact.
+
 ### C13 — `runtime-workspace-isolation`
 
 **Goal**
