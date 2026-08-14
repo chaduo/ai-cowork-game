@@ -22,4 +22,12 @@ export type CreatorGameDesignDraft = {
     status: 'clarifying' | 'ready' | 'iterating' | 'confirmed'
     custom_input: string
   }
+  readiness?: DesignReadiness
+}
+
+export type DesignReadiness = {
+  status: 'not_ready' | 'ready' | 'blocked'
+  blockers: string[]
+  unresolved_decisions: string[]
+  checked_at?: string | null
 }

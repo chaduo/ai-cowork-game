@@ -5,8 +5,19 @@ from pydantic import ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from app.contracts.design import DesignReadiness
 from app.contracts.gamespec import CreatorGameSpec, RuntimeBuildSpec
-from app.models import Build, BuildCandidate, GameDesign, GameSpecRevision, PlayableVersion, Project, Release, utc_now
+from app.models import (
+    Build,
+    BuildCandidate,
+    GameDesign,
+    GameDesignRevision,
+    GameSpecRevision,
+    PlayableVersion,
+    Project,
+    Release,
+    utc_now,
+)
 
 
 class ProjectStage(StrEnum):
@@ -19,6 +30,13 @@ class ProjectStage(StrEnum):
     PLAYABLE = "playable"
     PUBLISHED = "published"
     ARCHIVED = "archived"
+
+
+class DesignNotReadyError(ValueError):
+    def __init__(self, readiness: DesignReadiness) -> None:
+        self.readiness = readiness
+        blockers = readiness.blockers or readiness.unresolved_decisions or ["design_not_ready"]
+        super().__init__(f"design is not ready: {', '.join(blockers)}")
 
 
 class ProjectLifecycleService:
@@ -36,27 +54,72 @@ class ProjectLifecycleService:
     def submit_design(self, project_id: str, content: dict) -> GameDesign:
         project = self._project(project_id)
         design = self.session.scalar(select(GameDesign).where(GameDesign.project_id == project.id))
+        latest = self.session.scalar(
+            select(GameDesignRevision)
+            .where(GameDesignRevision.project_id == project.id)
+            .order_by(GameDesignRevision.revision_number.desc())
+        )
+        if latest is not None and latest.status == "draft":
+            latest.status = "superseded"
+            latest.superseded_at = utc_now()
+        readiness = DesignReadiness.model_validate(content.get("readiness", {}))
+        revision = GameDesignRevision(
+            project_id=project.id,
+            revision_number=(latest.revision_number + 1 if latest else 1),
+            content_json=json.dumps(content, ensure_ascii=False),
+            readiness_json=json.dumps(readiness.model_dump(mode="json"), ensure_ascii=False),
+            status="draft",
+        )
+        self.session.add(revision)
+        self.session.flush()
         if design is None:
-            design = GameDesign(project_id=project.id, content_json=json.dumps(content), status="submitted")
+            design = GameDesign(project_id=project.id, content_json=json.dumps(content, ensure_ascii=False), status="submitted")
             self.session.add(design)
         else:
-            design.content_json = json.dumps(content)
+            design.content_json = json.dumps(content, ensure_ascii=False)
             design.status = "submitted"
-            design.confirmed_at = None
+        design.current_revision_id = revision.id
         self.session.flush()
         return design
 
     def confirm_design(self, project_id: str) -> GameDesign:
         design = self._design(project_id)
+        if design.status == "confirmed" and design.current_revision_id == design.confirmed_revision_id:
+            return design
         if design.status != "submitted":
             raise ValueError("design must be submitted before confirmation")
+        revision = self.session.get(GameDesignRevision, design.current_revision_id) if design.current_revision_id else None
+        if revision is None:
+            raise ValueError("current design revision not found")
+        readiness = DesignReadiness.model_validate(json.loads(revision.readiness_json))
+        if readiness.status != "ready" or readiness.blockers or readiness.unresolved_decisions:
+            raise DesignNotReadyError(readiness)
+        for prior in self.session.scalars(
+            select(GameDesignRevision).where(
+                GameDesignRevision.project_id == project_id,
+                GameDesignRevision.status == "confirmed",
+                GameDesignRevision.id != revision.id,
+            )
+        ):
+            prior.status = "superseded"
+            prior.superseded_at = utc_now()
+        revision.status = "confirmed"
+        revision.confirmed_at = utc_now()
         design.status = "confirmed"
         design.confirmed_at = utc_now()
+        design.confirmed_revision_id = revision.id
+        design.content_json = revision.content_json
         self.session.flush()
         return design
 
     def create_gamespec_revision(self, project_id: str, content: dict) -> GameSpecRevision:
-        self._project(project_id)
+        project = self._project(project_id)
+        design = self.session.scalar(select(GameDesign).where(GameDesign.project_id == project.id))
+        source_design_revision_id = (
+            design.confirmed_revision_id
+            if design is not None and design.status == "confirmed"
+            else None
+        )
         latest = self.session.scalar(
             select(GameSpecRevision)
             .where(GameSpecRevision.project_id == project_id)
@@ -65,7 +128,8 @@ class ProjectLifecycleService:
         revision = GameSpecRevision(
             project_id=project_id,
             revision_number=(latest.revision_number + 1 if latest else 1),
-            content_json=json.dumps(content),
+            content_json=json.dumps(content, ensure_ascii=False),
+            source_design_revision_id=source_design_revision_id,
             status="draft",
         )
         self.session.add(revision)
@@ -76,6 +140,11 @@ class ProjectLifecycleService:
         revision = self.session.get(GameSpecRevision, revision_id)
         if revision is None or revision.project_id != project_id:
             raise ValueError("gamespec revision not found")
+        design = self.session.scalar(select(GameDesign).where(GameDesign.project_id == project_id))
+        if design is None or design.status != "confirmed" or not design.confirmed_revision_id:
+            raise ValueError("GameSpec confirmation requires confirmed Game Design")
+        if revision.source_design_revision_id is None:
+            revision.source_design_revision_id = design.confirmed_revision_id
         for prior in self.session.scalars(
             select(GameSpecRevision).where(
                 GameSpecRevision.project_id == project_id,

@@ -34,6 +34,7 @@ def test_gamespec_revision_is_saved_and_restored(isolated_database) -> None:
     assert saved.json()["revision_number"] == 1
     assert saved.json()["status"] == "draft"
     assert saved.json()["spec"] == valid_gamespec()
+    assert saved.json()["source_design_revision_id"]
 
     restored = client_for(str(isolated_database.url)).get(f"/api/v1/projects/{project['id']}/gamespec")
     assert restored.status_code == 200

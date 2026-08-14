@@ -1,4 +1,4 @@
-import type { CreatorGameDesignDraft } from '../contracts/creatorGameDesign'
+import type { CreatorGameDesignDraft, DesignReadiness } from '../contracts/creatorGameDesign'
 import type { CreatorGameSpec } from '../contracts/creatorGameSpec'
 
 export interface HealthResponse {
@@ -38,8 +38,13 @@ export interface ApiErrorBody {
 export interface DesignResponse {
   project_id: string
   design_id: string | null
+  revision_id: string | null
+  revision_number: number | null
+  confirmed_revision_id: string | null
+  confirmed_revision_number: number | null
   status: 'draft' | 'submitted' | 'confirmed'
   confirmed_at: string | null
+  readiness: DesignReadiness
   draft: CreatorGameDesignDraft
 }
 
@@ -49,6 +54,7 @@ export interface GameSpecResponse {
   revision_number: number
   status: 'draft' | 'confirmed' | 'superseded'
   confirmed_at: string | null
+  source_design_revision_id: string | null
   validation_errors: Array<Record<string, unknown>>
   spec: CreatorGameSpec
 }

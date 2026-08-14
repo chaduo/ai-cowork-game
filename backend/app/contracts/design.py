@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 
 from pydantic import Field
@@ -27,6 +28,13 @@ class ClarificationState(ContractModel):
     custom_input: str = ""
 
 
+class DesignReadiness(ContractModel):
+    status: Literal["not_ready", "ready", "blocked"] = "not_ready"
+    blockers: list[str] = Field(default_factory=list)
+    unresolved_decisions: list[str] = Field(default_factory=list)
+    checked_at: datetime | None = None
+
+
 class CreatorGameDesignDraft(ContractModel):
     schema_version: Literal[1] = 1
     original_idea: str = Field(min_length=1)
@@ -35,3 +43,4 @@ class CreatorGameDesignDraft(ContractModel):
     summary: DesignSummary
     decisions: list[DesignDecision] = Field(default_factory=list)
     clarification: ClarificationState = Field(default_factory=ClarificationState)
+    readiness: DesignReadiness = Field(default_factory=DesignReadiness)

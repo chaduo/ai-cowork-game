@@ -39,9 +39,26 @@ class GameDesign(Base):
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
     content_json: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    current_revision_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    confirmed_revision_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+
+class GameDesignRevision(Base):
+    __tablename__ = "game_design_revisions"
+    __table_args__ = (UniqueConstraint("project_id", "revision_number", name="uq_game_design_revision_number"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
+    revision_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    content_json: Mapped[str] = mapped_column(Text, nullable=False)
+    readiness_json: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
 class GameSpecRevision(Base):
@@ -52,6 +69,10 @@ class GameSpecRevision(Base):
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
     revision_number: Mapped[int] = mapped_column(Integer, nullable=False)
     content_json: Mapped[str] = mapped_column(Text, nullable=False)
+    source_design_revision_id: Mapped[str | None] = mapped_column(
+        ForeignKey("game_design_revisions.id"),
+        nullable=True,
+    )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
