@@ -50,3 +50,4 @@ __pycache__/
 *.py[cod]
 
 .worktrees/
+docs/development/c08-opengame-spike/raw/
