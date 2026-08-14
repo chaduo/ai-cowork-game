@@ -8,6 +8,7 @@ import { createGameSpecFixture } from '../components/workspace/gameSpecFixture'
 import { createResourceCandidates as createResourceCandidatesFixture } from '../components/resources/resourceFixtures'
 import { matchResourcesToSpec } from './resourceMatching'
 import type { ReleaseDraft, ReleasePhase, ReleaseRecord } from '../components/workspace/releaseTypes'
+import type { CreatorGameSpec } from '../contracts/creatorGameSpec'
 import type {
   CoworkMessage,
   GameSpecModel,
@@ -39,6 +40,10 @@ export type ProjectSession = {
   relationshipSnapshot: Readonly<RelationshipDraft> | null
   resourceBridgeAcknowledged: boolean
   resourceBatches: Record<string, ResourceBatchItem[]>
+  designStatus: 'draft' | 'submitted' | 'confirmed'
+  gamespecStatus: 'missing' | 'draft' | 'confirmed' | 'superseded'
+  canonicalGameSpec: CreatorGameSpec | null
+  gamespecRevisionId: string | null
 }
 
 export type ProjectStore = {
@@ -332,6 +337,10 @@ export function createProjectSession(design: ConfirmedGameDesign, projectId?: st
     relationshipSnapshot: null,
     resourceBridgeAcknowledged: false,
     resourceBatches: {},
+    designStatus: 'draft',
+    gamespecStatus: 'missing',
+    canonicalGameSpec: null,
+    gamespecRevisionId: null,
   }
 }
 
@@ -347,6 +356,25 @@ export function openProject(id: string): ProjectSession | null {
   if (!session) return null
   projectStore.activeProjectId = session.id
   return session
+}
+
+export function setProjectDesignStatus(projectId: string, status: ProjectSession['designStatus']): void {
+  const session = getProject(projectId)
+  if (!session) return
+  session.designStatus = status
+  touchProject(session)
+}
+
+export function setProjectGameSpecState(
+  projectId: string,
+  state: { status: Exclude<ProjectSession['gamespecStatus'], 'missing'>; revisionId: string; spec: CreatorGameSpec },
+): void {
+  const session = getProject(projectId)
+  if (!session) return
+  session.gamespecStatus = state.status
+  session.gamespecRevisionId = state.revisionId
+  session.canonicalGameSpec = state.spec
+  touchProject(session)
 }
 
 type TimerJobKey =
