@@ -43,3 +43,17 @@
 ## Downstream rule
 
 Before any C01-C24 implementation, the Change Brief must name the matrix row and canonical contract it consumes. If a row is still `legacy` or `replace` without an approved replacement, the Change is `Blocked` rather than an invitation to invent a parallel schema. Existing implementation that predates this rebaseline requires an explicit conformance audit and corrective Change before being treated as complete.
+
+## C00 closeout evidence
+
+The merged C01-C12 foundation is not automatically considered conformant. The
+2026-08-14 audit classifies each Change and routes gaps to focused briefs:
+
+- `docs/change-briefs/c05-contract-conformance.md`
+- `docs/change-briefs/c06-agent-context-conformance.md`
+- `docs/change-briefs/c07-run-input-conformance.md`
+- `docs/change-briefs/c11-build-context-conformance.md`
+- `docs/change-briefs/c12-verification-conformance.md`
+
+Until those corrective Changes are reviewed and implemented, C14/C15/C19 must
+not claim final V1 conformance from the foundation tests alone.

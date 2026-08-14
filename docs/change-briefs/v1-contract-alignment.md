@@ -7,7 +7,7 @@
 **Reviewer:** zhang（Required Review）
 **Priority:** P0
 **Depends On:** 无
-**Status:** In Progress
+**Status:** Review — self-audit complete; zhang Required Review pending
 
 ## 2. Goal
 
@@ -94,6 +94,21 @@ openspec/config.yaml updates
 file-by-file migration matrix
 explicit decision log for all C00 open questions
 ```
+
+Closeout evidence:
+
+```text
+docs/development/C00_CONFORMANCE_AUDIT_2026-08-14.md
+docs/change-briefs/c05-contract-conformance.md
+docs/change-briefs/c06-agent-context-conformance.md
+docs/change-briefs/c07-run-input-conformance.md
+docs/change-briefs/c11-build-context-conformance.md
+docs/change-briefs/c12-verification-conformance.md
+```
+
+C01-C12 foundation code is merged, but the audit records conformance gaps as
+independent corrective inputs. C00 is not Done until the Required Review is
+recorded and the closeout gate evidence is attached.
 
 ## 9. Interfaces / Contracts
 

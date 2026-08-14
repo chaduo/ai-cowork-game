@@ -14,7 +14,7 @@
 - Prototype 已跑通以下产品行为：
   `Idea → Game Design → GameSpec → Build → Playable → Change → Version Restore → Publish → Release → Resource Review → 我的资源 → 新项目资源复用`。
 - Prototype 的业务状态位于 `frontend/src/stores/projectStore.ts`，使用 deterministic local state 和 timers；它是交互行为参考，不是 V1 持久化架构。
-- C01-C12 已在功能 worktree 中建立 FastAPI、SQLite、Project/GameSpec、RunEvent、Build、Candidate 与平台验证基础；合并状态和最新版 Design Spec conformance 仍需逐 Change 审核。
+- C01-C12 基础实现已合并到当前 `main`（PR #6，`6ab1b6e`）；最新版 Design Spec conformance 仍需逐 Change 审核。审计结论见 `docs/development/C00_CONFORMANCE_AUDIT_2026-08-14.md`。
 - `openspec/changes/platform-v1-opengame-baseline/`、`openspec/config.yaml` 和 `specs/001-game-creation-mvp/contracts/` 是重要设计材料，但其中的单项目限制、固定 survival 范围、GameSpec schema 和自动 publication 语义与当前 Prototype 不完全一致。
 
 ### 0.2 事实源优先级
