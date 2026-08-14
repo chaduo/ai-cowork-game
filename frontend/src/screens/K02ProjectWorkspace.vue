@@ -344,6 +344,9 @@ onMounted(async () => {
           revisionId: response.revision_id,
           spec: response.spec,
         })
+        if (response.status === 'confirmed') {
+          setWorkspacePhase(session.id, getCurrentPlayable(session) ? 'playable_ready' : 'spec_confirmed')
+        }
       } catch (cause) {
         if (!(cause instanceof ApiClientError && cause.code === 'gamespec_not_found')) {
           gamespecError.value = cause instanceof ApiClientError ? cause.message : '暂时无法读取 GameSpec。'
