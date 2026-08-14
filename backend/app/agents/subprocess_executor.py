@@ -18,7 +18,6 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
-import subprocess
 import sys
 import time
 from typing import Any
@@ -26,6 +25,7 @@ from typing import Any
 from app.agents.executor import (
     AsyncLineCallback,
     DEFAULT_OUTPUT_LIMIT_BYTES,
+    ExecutorBusyError,
     ProcessResult,
     ProcessStatus,
 )
@@ -43,7 +43,11 @@ class AsyncSubprocessExecutor:
     """Runs one external command with an env allowlist and tree-cancel."""
 
     def __init__(self, *, output_limit_bytes: int = DEFAULT_OUTPUT_LIMIT_BYTES) -> None:
+        if output_limit_bytes <= 0:
+            raise ValueError("output_limit_bytes must be positive")
         self._output_limit = output_limit_bytes
+        self._state_lock = asyncio.Lock()
+        self._active = False
         self._cancel_requested = False
         self._proc: asyncio.subprocess.Process | None = None
 
@@ -58,8 +62,39 @@ class AsyncSubprocessExecutor:
         on_stdout_line: AsyncLineCallback | None = None,
         on_stderr_line: AsyncLineCallback | None = None,
     ) -> ProcessResult:
-        self._cancel_requested = False
-        self._proc = None
+        async with self._state_lock:
+            if self._active:
+                raise ExecutorBusyError("executor already owns an active process")
+            self._active = True
+            self._cancel_requested = False
+            self._proc = None
+
+        try:
+            return await self._run_owned(
+                command=command,
+                arguments=arguments,
+                cwd=cwd,
+                approved_env=approved_env,
+                timeout=timeout,
+                on_stdout_line=on_stdout_line,
+                on_stderr_line=on_stderr_line,
+            )
+        finally:
+            async with self._state_lock:
+                self._proc = None
+                self._active = False
+
+    async def _run_owned(
+        self,
+        *,
+        command: str,
+        arguments: list[str],
+        cwd: str,
+        approved_env: dict[str, str],
+        timeout: float | None,
+        on_stdout_line: AsyncLineCallback | None,
+        on_stderr_line: AsyncLineCallback | None,
+    ) -> ProcessResult:
 
         # Build the child env: only approved vars + the minimal essentials (taken
         # from the parent's env, not from arbitrary frontend input).
@@ -142,26 +177,34 @@ class AsyncSubprocessExecutor:
 
         process_status: ProcessStatus = "completed"
         exit_code: int | None = None
-        try:
-            if timeout is None:
-                exit_code = await wait_for_completion()
-            else:
-                exit_code = await asyncio.wait_for(wait_for_completion(), timeout=timeout)
-        except asyncio.TimeoutError:
-            process_status = "timed_out"
-            await self._kill_tree()
-            exit_code = self._proc.returncode  # likely None or signal
-        except asyncio.CancelledError:
-            # The test harness may cancel our task; ensure the tree dies too.
+        if self._cancel_requested:
             process_status = "cancelled"
             await self._kill_tree()
-            raise
-        finally:
-            # If cancel() was called externally, the proc may still be alive.
-            if process_status == "completed" and self._cancel_requested:
+            exit_code = self._proc.returncode
+        else:
+            try:
+                if timeout is None:
+                    exit_code = await wait_for_completion()
+                else:
+                    exit_code = await asyncio.wait_for(wait_for_completion(), timeout=timeout)
+            except asyncio.TimeoutError:
+                process_status = "timed_out"
+                await self._kill_tree()
+                exit_code = self._proc.returncode  # likely None or signal
+            except asyncio.CancelledError:
+                # The test harness may cancel our task; ensure the tree dies too.
                 process_status = "cancelled"
                 await self._kill_tree()
-                exit_code = self._proc.returncode
+                raise
+            finally:
+                if (
+                    process_status == "completed"
+                    and self._cancel_requested
+                ):
+                    process_status = "cancelled"
+                    if self._proc.returncode is None:
+                        await self._kill_tree()
+                    exit_code = self._proc.returncode
 
         # Make sure all child-facing tasks finish after timeout or cancellation.
         await asyncio.gather(process_wait, drain_out, drain_err, return_exceptions=True)
@@ -178,8 +221,13 @@ class AsyncSubprocessExecutor:
 
     async def cancel(self) -> None:
         """Cancel the in-flight run: kill the whole process tree."""
-        self._cancel_requested = True
-        if self._proc is not None and self._proc.returncode is None:
+        if not self._active:
+            return
+        if self._proc is None:
+            self._cancel_requested = True
+            return
+        if self._proc.returncode is None:
+            self._cancel_requested = True
             await self._kill_tree()
 
     async def _kill_tree(self) -> None:
@@ -195,6 +243,8 @@ class AsyncSubprocessExecutor:
                 stderr=asyncio.subprocess.DEVNULL,
             )
             await kill.wait()
+            if kill.returncode != 0 and proc.returncode is None:
+                proc.kill()
         else:
             try:
                 os.killpg(os.getpgid(pid), signal.SIGKILL)
@@ -205,4 +255,9 @@ class AsyncSubprocessExecutor:
         try:
             await asyncio.wait_for(proc.wait(), timeout=5)
         except asyncio.TimeoutError:
-            pass
+            if proc.returncode is None:
+                proc.kill()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=1)
+            except asyncio.TimeoutError as retry_error:
+                raise RuntimeError(f"failed to reap process {pid}") from retry_error

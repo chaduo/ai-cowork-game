@@ -14,8 +14,9 @@ import sys
 
 import pytest
 
-from app.agents.executor import ProcessResult
+from app.agents.executor import ExecutorBusyError, ProcessResult
 from app.agents.subprocess_executor import AsyncSubprocessExecutor
+from app.agents import subprocess_executor as subprocess_executor_module
 
 NODE = sys.executable  # the python running pytest is NOT node; use a real node below
 
@@ -207,6 +208,110 @@ def test_cancel_kills_tree_and_reports_cancelled(workspace) -> None:
     result = run_async(run_and_cancel())
     assert result.process_status == "cancelled"
     assert result.process_status != "completed"
+
+
+def test_cancel_requested_during_spawn_is_not_lost(workspace, monkeypatch) -> None:
+    executor = AsyncSubprocessExecutor()
+    real_create = subprocess_executor_module.asyncio.create_subprocess_exec
+
+    async def scenario() -> ProcessResult:
+        spawn_started = asyncio.Event()
+        allow_spawn = asyncio.Event()
+
+        async def delayed_create(*args, **kwargs):
+            spawn_started.set()
+            await allow_spawn.wait()
+            return await real_create(*args, **kwargs)
+
+        monkeypatch.setattr(
+            subprocess_executor_module.asyncio,
+            "create_subprocess_exec",
+            delayed_create,
+        )
+        run_task = asyncio.create_task(
+            executor.run(
+                command=_node(),
+                arguments=["-e", "setInterval(()=>{},1000)"],
+                cwd=str(workspace),
+                approved_env={},
+                timeout=None,
+            )
+        )
+        await spawn_started.wait()
+        await executor.cancel()
+        allow_spawn.set()
+        return await asyncio.wait_for(run_task, timeout=2)
+
+    result = run_async(scenario())
+    assert result.process_status == "cancelled"
+
+
+def test_second_concurrent_run_is_rejected_without_replacing_active_process(workspace) -> None:
+    executor = AsyncSubprocessExecutor()
+
+    async def scenario() -> ProcessResult:
+        first = asyncio.create_task(
+            executor.run(
+                command=_node(),
+                arguments=["-e", "setInterval(()=>{},1000)"],
+                cwd=str(workspace),
+                approved_env={},
+                timeout=None,
+            )
+        )
+        await asyncio.sleep(0.2)
+        with pytest.raises(ExecutorBusyError):
+            await executor.run(
+                command=_node(),
+                arguments=["-e", "process.exit(0)"],
+                cwd=str(workspace),
+                approved_env={},
+                timeout=None,
+            )
+        await executor.cancel()
+        return await asyncio.wait_for(first, timeout=2)
+
+    result = run_async(scenario())
+    assert result.process_status == "cancelled"
+
+
+def test_windows_taskkill_failure_falls_back_to_direct_kill(monkeypatch) -> None:
+    executor = AsyncSubprocessExecutor()
+
+    class OwnedProcess:
+        pid = 123
+        returncode = None
+        kill_called = False
+
+        def kill(self) -> None:
+            self.kill_called = True
+            self.returncode = -9
+
+        async def wait(self) -> int:
+            return self.returncode or 0
+
+    class FailedTaskkill:
+        returncode = 1
+
+        async def wait(self) -> int:
+            return self.returncode
+
+    owned = OwnedProcess()
+
+    async def fake_create(*_args, **_kwargs):
+        return FailedTaskkill()
+
+    executor._proc = owned  # type: ignore[assignment]
+    monkeypatch.setattr(subprocess_executor_module.sys, "platform", "win32")
+    monkeypatch.setattr(
+        subprocess_executor_module.asyncio,
+        "create_subprocess_exec",
+        fake_create,
+    )
+
+    run_async(executor._kill_tree())
+
+    assert owned.kill_called is True
 
 
 # --------------------------------------------------------------------------- #

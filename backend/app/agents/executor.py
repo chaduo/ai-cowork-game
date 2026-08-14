@@ -33,6 +33,10 @@ from typing import Literal, Protocol
 ProcessStatus = Literal["completed", "timed_out", "cancelled"]
 AsyncLineCallback = Callable[[str], Awaitable[None]]
 
+
+class ExecutorBusyError(RuntimeError):
+    """Raised when one executor instance is asked to own two active runs."""
+
 # Soft cap on captured stdout/stderr to bound memory. Anything beyond is truncated
 # and flagged via ``ProcessResult.output_truncated`` so the adapter can surface a
 # diagnostic without carrying an unbounded buffer.
