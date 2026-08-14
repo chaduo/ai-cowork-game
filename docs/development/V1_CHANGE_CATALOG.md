@@ -512,6 +512,13 @@ output: stdout, stderr, exit_code, process_status, duration
 - 成功只创建 BuildCandidate；失败/取消不修改 current Playable。
 - 后端重启不会让 run 永久卡在 running。
 
+**C11 implementation evidence (2026-08-14)**
+
+- `BuildService` persists the confirmed GameSpec revision, baseline playable pointer, operation and request text before invoking the C06 `GameAgent` contract.
+- `FakeGameAgent` is the deterministic provider used by the C11 service/API tests; no OpenGame subprocess or log parser is included.
+- Stable `build_id`/`run_id`, single-active-build guard, retry ancestry, cancellation, terminal diagnostics and orphan recovery are covered by `backend/tests/test_c11_build_orchestration.py` and `backend/tests/test_c11_build_api.py`.
+- Success creates a `BuildCandidate` only; no code in C11 changes `Project.current_playable_version_id`, creates a `PlayableVersion`, or publishes a `Release`.
+
 ### C12 — `candidate-test-gate`
 
 **Goal**
