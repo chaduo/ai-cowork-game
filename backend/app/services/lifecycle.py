@@ -343,6 +343,7 @@ class ProjectLifecycleService:
         artifact_path: str | None = None,
         failure_code: str | None = None,
         diagnostics_json: str | None = None,
+        build_context_id: str | None = None,
     ) -> BuildCandidate:
         if status not in {"succeeded", "failed", "cancelled", "timed_out", "invalid_output", "unsupported", "orphaned"}:
             raise ValueError("invalid terminal build status")
@@ -353,6 +354,10 @@ class ProjectLifecycleService:
         if existing:
             if build.status != status:
                 raise ValueError("build already finished with a different status")
+            if build_context_id and existing.build_context_id not in {None, build_context_id}:
+                raise ValueError("build candidate already belongs to another context")
+            if build_context_id and existing.build_context_id is None:
+                existing.build_context_id = build_context_id
             return existing
         if build.status not in {"running", "pending", "cancelling"}:
             raise ValueError("build is not active")
@@ -367,6 +372,7 @@ class ProjectLifecycleService:
             project_id=build.project_id,
             build_id=build.id,
             status=status,
+            build_context_id=build_context_id,
             summary=summary,
             artifact_path=artifact_path,
             diagnostics_json=diagnostics_json,

@@ -1,11 +1,13 @@
 import asyncio
+import json
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents.fake_game_agent import FakeGameAgent
-from app.models import Build, BuildCandidate, Project, Run
+from app.contracts.game_agent import AffectedScope, BuildOverride, ResourceReference
+from app.models import Build, BuildCandidate, BuildContext, Project, Run
 from app.services.builds import BuildService
 from app.services.lifecycle import ProjectLifecycleService
 from tests.test_c05_design_api import draft_payload
@@ -40,6 +42,110 @@ def test_create_build_captures_confirmed_input_and_stable_ids(isolated_database)
         assert run is not None and run.build_id == build.id
         assert job.build_id == "build-c11-1"
         assert job.run_id == "run-c11-1"
+
+
+def test_build_context_is_immutable_and_candidate_provenance_is_linked(isolated_database) -> None:
+    with Session(isolated_database) as session:
+        project = confirmed_project(session)
+        project.current_playable_version_id = "playable-before-context"
+        agent = FakeGameAgent()
+        service = BuildService(session, agent)
+        scope = AffectedScope(sections=["gameplay", "characters"], description="关系玩法 first playable")
+        resources = [ResourceReference(
+            resource_id="relationship-system",
+            resource_revision="resource-rev-1",
+            source_project_id="source-project-1",
+            source_release_id="release-1",
+            snapshot_hash="a" * 64,
+            role="gameplay-module",
+        )]
+        overrides = [BuildOverride(
+            key="max_favor",
+            value=100,
+            source="resource",
+            provenance="resource-rev-1",
+        )]
+        job = service.create_build(
+            project.id,
+            affected_scope=scope,
+            resource_references=resources,
+            implementation_dependencies=["relationship-events:v1"],
+            relevant_overrides=overrides,
+        )
+        context = session.scalar(select(BuildContext).where(BuildContext.build_id == job.build_id))
+        assert context is not None
+        original_hashes = (context.context_hash, context.gamespec_snapshot_hash, context.runtime_build_spec_hash)
+        original_snapshot = context.gamespec_snapshot_json
+
+        project.current_playable_version_id = "playable-after-context"
+        later_spec = valid_gamespec()
+        later_spec["title"] = "后来编辑的游戏"
+        later_revision = service.lifecycle.create_gamespec_revision(project.id, later_spec)
+        service.lifecycle.confirm_gamespec_revision(project.id, later_revision.id)
+        service.lifecycle._design(project.id).status = "draft"
+        request = service._request_for(session.get(Build, job.build_id), session.get(Run, job.run_id))
+        result = asyncio.run(service.execute_build(job.build_id))
+        session.commit()
+
+        candidate = session.scalar(select(BuildCandidate).where(BuildCandidate.build_id == job.build_id))
+        refreshed = session.get(BuildContext, context.id)
+        assert result.status == "succeeded"
+        assert candidate is not None and candidate.build_context_id == context.id
+        assert refreshed is not None
+        assert (refreshed.context_hash, refreshed.gamespec_snapshot_hash, refreshed.runtime_build_spec_hash) == original_hashes
+        assert refreshed.gamespec_snapshot_json == original_snapshot
+        assert request.creator_game_spec.title == "多代田园物语"
+        assert request.affected_scope == scope
+        assert request.resource_references == resources
+        assert request.implementation_dependencies == ["relationship-events:v1"]
+        assert request.relevant_overrides == overrides
+        assert agent.requests[0].build_id == job.build_id
+
+
+def test_duplicate_build_request_cannot_replace_existing_context(isolated_database) -> None:
+    with Session(isolated_database) as session:
+        project = confirmed_project(session)
+        service = BuildService(session, FakeGameAgent())
+        first = service.create_build(
+            project.id,
+            build_id="context-idempotent-build",
+            run_id="context-idempotent-run",
+            affected_scope=AffectedScope(sections=["first"]),
+        )
+        context = session.scalar(select(BuildContext).where(BuildContext.build_id == first.build_id))
+        duplicate = service.create_build(
+            project.id,
+            build_id="context-idempotent-build",
+            run_id="context-idempotent-run",
+            affected_scope=AffectedScope(sections=["replacement"]),
+        )
+
+        assert duplicate == first
+        assert session.scalar(select(BuildContext).where(BuildContext.build_id == first.build_id)).id == context.id
+        assert json.loads(context.affected_scope_json)["sections"] == ["first"]
+
+
+def test_retry_copies_context_without_mutating_parent(isolated_database) -> None:
+    with Session(isolated_database) as session:
+        project = confirmed_project(session)
+        service = BuildService(session, FakeGameAgent({"modify": "failed"}))
+        first = service.create_build(
+            project.id,
+            operation="modify",
+            affected_scope=AffectedScope(sections=["characters"]),
+            implementation_dependencies=["npc-runtime:v2"],
+        )
+        asyncio.run(service.execute_build(first.build_id))
+        retry = service.retry_build(first.build_id)
+        session.commit()
+
+        parent_context = session.scalar(select(BuildContext).where(BuildContext.build_id == first.build_id))
+        retry_context = session.scalar(select(BuildContext).where(BuildContext.build_id == retry.build_id))
+        assert parent_context is not None and retry_context is not None
+        assert retry_context.id != parent_context.id
+        assert retry_context.context_hash == parent_context.context_hash
+        assert retry_context.affected_scope_json == parent_context.affected_scope_json
+        assert retry_context.implementation_dependencies_json == parent_context.implementation_dependencies_json
 
 
 def test_build_captures_baseline_playable_pointer_once(isolated_database) -> None:

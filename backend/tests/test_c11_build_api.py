@@ -43,6 +43,39 @@ def test_build_api_creates_stable_job_and_query_returns_candidate(isolated_datab
     assert queried.json()["status"] == "succeeded"
     assert queried.json()["candidate_id"]
     assert queried.json()["artifact_path"] == "dist/index.html"
+    assert queried.json()["build_context_id"]
+    assert len(queried.json()["build_context_hash"]) == 64
+
+
+def test_build_api_persists_task_scoped_context_fields(isolated_database) -> None:
+    client, project_id, _ = client_and_project(str(isolated_database.url))
+
+    response = client.post(
+        f"/api/v1/projects/{project_id}/builds",
+        json={
+            "build_id": "api-context-build",
+            "run_id": "api-context-run",
+            "affected_scope": {"sections": ["gameplay"], "description": "关系玩法"},
+            "resource_references": [{
+                "resource_id": "relationship-system",
+                "resource_revision": "resource-rev-1",
+                "source_project_id": "source-project-1",
+                "snapshot_hash": "b" * 64,
+                "role": "gameplay-module",
+            }],
+            "implementation_dependencies": ["relationship-events:v1"],
+            "relevant_overrides": [{
+                "key": "max_favor",
+                "value": 100,
+                "source": "resource",
+                "provenance": "resource-rev-1",
+            }],
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["build_context_id"]
+    assert response.json()["build_context_hash"]
 
 
 def test_build_api_failure_and_retry_keep_failure_diagnostics(isolated_database) -> None:

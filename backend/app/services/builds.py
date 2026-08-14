@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -10,8 +11,20 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents.game_agent import GameAgent
-from app.contracts.game_agent import AgentRunHandle, ContractError, GameBuildRequest, GameBuildResult, RunEvent, WorkspaceRef
-from app.models import Build, GameDesign, Project, Run
+from app.contracts.game_agent import (
+    AffectedScope,
+    AgentRunHandle,
+    BuildOverride,
+    ContractError,
+    ContractProfile,
+    GameBuildRequest,
+    GameBuildResult,
+    ResourceReference,
+    RunEvent,
+    WorkspaceRef,
+)
+from app.contracts.gamespec import CreatorGameSpec, RuntimeBuildSpec
+from app.models import Build, BuildContext, Project, Run, new_id, utc_now
 from app.repositories.runs import RUN_ACTIVE_STATUSES, RUN_EXECUTION_STATUSES, RunRepository
 from app.services.lifecycle import ProjectLifecycleService
 
@@ -41,6 +54,10 @@ class BuildService:
         request_text: str = "",
         build_id: str | None = None,
         run_id: str | None = None,
+        affected_scope: AffectedScope | None = None,
+        resource_references: list[ResourceReference] | None = None,
+        implementation_dependencies: list[str] | None = None,
+        relevant_overrides: list[BuildOverride] | None = None,
     ) -> BuildJob:
         if build_id:
             existing = self.session.get(Build, build_id)
@@ -52,6 +69,13 @@ class BuildService:
                     raise ValueError("build id already belongs to another run")
                 if existing_run is None:
                     existing_run = self.runs.create_run(run_id or f"run-{existing.id}", existing.id)
+                self._ensure_context(
+                    existing,
+                    affected_scope=affected_scope,
+                    resource_references=resource_references,
+                    implementation_dependencies=implementation_dependencies,
+                    relevant_overrides=relevant_overrides,
+                )
                 return BuildJob(existing.id, existing_run.id)
 
         project = self.session.get(Project, project_id)
@@ -65,6 +89,13 @@ class BuildService:
         )
         stable_run_id = run_id or f"run-{build.id}"
         run = self.runs.create_run(stable_run_id, build.id)
+        self._create_context(
+            build,
+            affected_scope=affected_scope,
+            resource_references=resource_references,
+            implementation_dependencies=implementation_dependencies,
+            relevant_overrides=relevant_overrides,
+        )
         self.session.flush()
         return BuildJob(build.id, run.id)
 
@@ -72,19 +103,25 @@ class BuildService:
         project = self.session.get(Project, build.project_id)
         if project is None:
             raise ValueError("project not found")
-        design = self.session.scalar(select(GameDesign).where(GameDesign.project_id == project.id))
-        if design is None or design.status != "confirmed":
-            raise ValueError("build requires confirmed Game Design")
-        creator = self.lifecycle.validate_gamespec_revision(build.gamespec_revision_id)
+        context = self._ensure_context(build)
+        creator = CreatorGameSpec.model_validate_json(context.gamespec_snapshot_json)
+        runtime = RuntimeBuildSpec.model_validate_json(context.runtime_build_spec_json)
         return GameBuildRequest(
-            project_id=project.id,
+            project_id=context.project_id,
             build_id=build.id,
-            operation=build.operation,
+            operation=context.operation,
             creator_game_spec=creator,
-            runtime_build_spec=creator.to_runtime_build_spec(),
+            runtime_build_spec=runtime,
             workspace=WorkspaceRef(root=f"runs/{run.id}", allowed_paths=["dist", "logs"]),
-            baseline_playable=build.baseline_playable_version_id,
-            request_text=build.request_text,
+            baseline_playable=context.baseline_playable_version_id,
+            request_text=context.request_text,
+            affected_scope=AffectedScope.model_validate_json(context.affected_scope_json),
+            resource_references=[ResourceReference.model_validate(item) for item in json.loads(context.resource_references_json)],
+            implementation_dependencies=json.loads(context.implementation_dependencies_json),
+            relevant_overrides=[BuildOverride.model_validate(item) for item in json.loads(context.relevant_overrides_json)],
+            game_design_profile=ContractProfile.model_validate_json(context.game_design_profile_json),
+            gamespec_profile=ContractProfile.model_validate_json(context.gamespec_profile_json),
+            game_build_profile=ContractProfile.model_validate_json(context.game_build_profile_json),
         )
 
     async def execute_build(self, build_id: str) -> GameBuildResult:
@@ -133,6 +170,8 @@ class BuildService:
         if prior is None:
             raise ValueError("build not found")
         retry = self.lifecycle.retry_build(build_id)
+        parent_context = self._ensure_context(prior)
+        self._copy_context(parent_context, retry)
         run = self.runs.create_run(f"run-{retry.id}", retry.id)
         self.session.flush()
         return BuildJob(retry.id, run.id)
@@ -194,6 +233,7 @@ class BuildService:
             artifact_path=artifact_path,
             failure_code=result.error.code if result.error else None,
             diagnostics_json=diagnostics_json or None,
+            build_context_id=self._ensure_context(build).id,
         )
         self.session.flush()
         self._handles.pop(build.id, None)
@@ -232,3 +272,133 @@ class BuildService:
             metadata={"build_id": build.id},
             pending_decision=pending,
         )
+
+    def _ensure_context(
+        self,
+        build: Build,
+        *,
+        affected_scope: AffectedScope | None = None,
+        resource_references: list[ResourceReference] | None = None,
+        implementation_dependencies: list[str] | None = None,
+        relevant_overrides: list[BuildOverride] | None = None,
+    ) -> BuildContext:
+        context = self.session.scalar(select(BuildContext).where(BuildContext.build_id == build.id))
+        if context is not None:
+            return context
+        return self._create_context(
+            build,
+            affected_scope=affected_scope,
+            resource_references=resource_references,
+            implementation_dependencies=implementation_dependencies,
+            relevant_overrides=relevant_overrides,
+        )
+
+    def _create_context(
+        self,
+        build: Build,
+        *,
+        affected_scope: AffectedScope | None = None,
+        resource_references: list[ResourceReference] | None = None,
+        implementation_dependencies: list[str] | None = None,
+        relevant_overrides: list[BuildOverride] | None = None,
+    ) -> BuildContext:
+        existing = self.session.scalar(select(BuildContext).where(BuildContext.build_id == build.id))
+        if existing is not None:
+            return existing
+        creator = self.lifecycle.validate_gamespec_revision(build.gamespec_revision_id)
+        runtime = creator.to_runtime_build_spec()
+        scope = affected_scope or AffectedScope()
+        resources = resource_references or []
+        dependencies = implementation_dependencies or []
+        overrides = relevant_overrides or []
+        design_profile = ContractProfile(name="creator-game-design", version="1", capabilities=[])
+        gamespec_profile = ContractProfile(name="creator-gamespec", version="1", capabilities=[])
+        build_profile = ContractProfile(name="runtime-build", version="1", capabilities=[])
+        gamespec_json = _canonical_json(creator.model_dump(mode="json"))
+        runtime_json = _canonical_json(runtime.model_dump(mode="json"))
+        scope_json = _canonical_json(scope.model_dump(mode="json"))
+        resources_json = _canonical_json([item.model_dump(mode="json") for item in resources])
+        dependencies_json = _canonical_json(dependencies)
+        overrides_json = _canonical_json([item.model_dump(mode="json") for item in overrides])
+        design_profile_json = _canonical_json(design_profile.model_dump(mode="json"))
+        gamespec_profile_json = _canonical_json(gamespec_profile.model_dump(mode="json"))
+        build_profile_json = _canonical_json(build_profile.model_dump(mode="json"))
+        context_payload = {
+            "project_id": build.project_id,
+            "gamespec_revision_id": build.gamespec_revision_id,
+            "gamespec_snapshot_hash": _sha256(gamespec_json),
+            "runtime_build_spec_hash": _sha256(runtime_json),
+            "baseline_playable_version_id": build.baseline_playable_version_id,
+            "affected_scope": json.loads(scope_json),
+            "resource_references": json.loads(resources_json),
+            "implementation_dependencies": json.loads(dependencies_json),
+            "relevant_overrides": json.loads(overrides_json),
+            "game_design_profile": json.loads(design_profile_json),
+            "gamespec_profile": json.loads(gamespec_profile_json),
+            "game_build_profile": json.loads(build_profile_json),
+            "operation": build.operation,
+            "request_text": build.request_text,
+        }
+        context = BuildContext(
+            id=new_id(),
+            build_id=build.id,
+            project_id=build.project_id,
+            gamespec_revision_id=build.gamespec_revision_id,
+            gamespec_snapshot_json=gamespec_json,
+            gamespec_snapshot_hash=_sha256(gamespec_json),
+            runtime_build_spec_json=runtime_json,
+            runtime_build_spec_hash=_sha256(runtime_json),
+            baseline_playable_version_id=build.baseline_playable_version_id,
+            affected_scope_json=scope_json,
+            resource_references_json=resources_json,
+            implementation_dependencies_json=dependencies_json,
+            relevant_overrides_json=overrides_json,
+            game_design_profile_json=design_profile_json,
+            gamespec_profile_json=gamespec_profile_json,
+            game_build_profile_json=build_profile_json,
+            operation=build.operation,
+            request_text=build.request_text,
+            context_hash=_sha256(_canonical_json(context_payload)),
+            created_at=utc_now(),
+        )
+        self.session.add(context)
+        self.session.flush()
+        return context
+
+    def _copy_context(self, source: BuildContext, build: Build) -> BuildContext:
+        existing = self.session.scalar(select(BuildContext).where(BuildContext.build_id == build.id))
+        if existing is not None:
+            return existing
+        context = BuildContext(
+            id=new_id(),
+            build_id=build.id,
+            project_id=source.project_id,
+            gamespec_revision_id=source.gamespec_revision_id,
+            gamespec_snapshot_json=source.gamespec_snapshot_json,
+            gamespec_snapshot_hash=source.gamespec_snapshot_hash,
+            runtime_build_spec_json=source.runtime_build_spec_json,
+            runtime_build_spec_hash=source.runtime_build_spec_hash,
+            baseline_playable_version_id=source.baseline_playable_version_id,
+            affected_scope_json=source.affected_scope_json,
+            resource_references_json=source.resource_references_json,
+            implementation_dependencies_json=source.implementation_dependencies_json,
+            relevant_overrides_json=source.relevant_overrides_json,
+            game_design_profile_json=source.game_design_profile_json,
+            gamespec_profile_json=source.gamespec_profile_json,
+            game_build_profile_json=source.game_build_profile_json,
+            operation=source.operation,
+            request_text=source.request_text,
+            context_hash=source.context_hash,
+            created_at=utc_now(),
+        )
+        self.session.add(context)
+        self.session.flush()
+        return context
+
+
+def _canonical_json(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _sha256(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()

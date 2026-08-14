@@ -106,6 +106,35 @@ class Build(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
+class BuildContext(Base):
+    __tablename__ = "build_contexts"
+    __table_args__ = (
+        UniqueConstraint("build_id", name="uq_build_context_build"),
+        Index("ix_build_contexts_project_created", "project_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    build_id: Mapped[str] = mapped_column(ForeignKey("builds.id"), nullable=False)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
+    gamespec_revision_id: Mapped[str] = mapped_column(ForeignKey("game_spec_revisions.id"), nullable=False)
+    gamespec_snapshot_json: Mapped[str] = mapped_column(Text, nullable=False)
+    gamespec_snapshot_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    runtime_build_spec_json: Mapped[str] = mapped_column(Text, nullable=False)
+    runtime_build_spec_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    baseline_playable_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    affected_scope_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    resource_references_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    implementation_dependencies_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    relevant_overrides_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    game_design_profile_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    gamespec_profile_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    game_build_profile_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    operation: Mapped[str] = mapped_column(String(80), nullable=False)
+    request_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    context_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
 class Run(Base):
     __tablename__ = "runs"
 
@@ -167,6 +196,7 @@ class BuildCandidate(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
     build_id: Mapped[str] = mapped_column(ForeignKey("builds.id"), nullable=False, unique=True)
+    build_context_id: Mapped[str | None] = mapped_column(ForeignKey("build_contexts.id"), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     test_gate_status: Mapped[str] = mapped_column(String(20), nullable=False, default="untested")
     parent_candidate_id: Mapped[str | None] = mapped_column(ForeignKey("build_candidates.id"), nullable=True)

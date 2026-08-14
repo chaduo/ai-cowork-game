@@ -95,6 +95,7 @@ class GameBuildRequest(ContractModel):
     request_text: str = Field(default="", max_length=4000)
     affected_scope: AffectedScope = Field(default_factory=AffectedScope)
     resource_references: list[ResourceReference] = Field(default_factory=list, max_length=128)
+    implementation_dependencies: list[str] = Field(default_factory=list, max_length=128)
     relevant_overrides: list[BuildOverride] = Field(default_factory=list, max_length=128)
     game_design_profile: ContractProfile = Field(
         default_factory=lambda: ContractProfile(name="creator-game-design", version="1", capabilities=[]),
