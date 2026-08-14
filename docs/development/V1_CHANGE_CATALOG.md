@@ -1,29 +1,31 @@
 # AI Cowork Game V1 Change Catalog
 
-> 状态：`Explore Ready`。本文件是 V1 roadmap、Change 边界和 OpenSpec Explore 的统一输入，
+> 状态：`Rebaseline Required`。本文件是 V1 roadmap、Change 边界和 OpenSpec Explore 的统一输入，
 > 不是已经冻结的领域 Spec，也不能替代每个 Change 的 proposal/spec/design/tasks。
+> `docs/product/AI_COWORK_GAME_V1_DESIGN_SPEC.md` 是最高产品事实源；本 Catalog 必须与其保持一致。
 
 ## 0. 如何使用本文件
 
 ### 0.1 当前仓库事实
 
-截至 2026-08-13：
+截至 2026-08-14：
 
 - `frontend/` 是 Vue 3 + TypeScript + Vite 的前端 Prototype。
 - Prototype 已跑通以下产品行为：
   `Idea → Game Design → GameSpec → Build → Playable → Change → Version Restore → Publish → Release → Resource Review → 我的资源 → 新项目资源复用`。
 - Prototype 的业务状态位于 `frontend/src/stores/projectStore.ts`，使用 deterministic local state 和 timers；它是交互行为参考，不是 V1 持久化架构。
-- 主应用尚无 FastAPI、SQLite、BuildService、真实 artifact hosting 或 OpenGame runtime 实现。
+- C01-C12 已在功能 worktree 中建立 FastAPI、SQLite、Project/GameSpec、RunEvent、Build、Candidate 与平台验证基础；合并状态和最新版 Design Spec conformance 仍需逐 Change 审核。
 - `openspec/changes/platform-v1-opengame-baseline/`、`openspec/config.yaml` 和 `specs/001-game-creation-mvp/contracts/` 是重要设计材料，但其中的单项目限制、固定 survival 范围、GameSpec schema 和自动 publication 语义与当前 Prototype 不完全一致。
 
 ### 0.2 事实源优先级
 
-在 V1 alignment change 完成前，按以下优先级处理冲突：
+按以下优先级处理冲突：
 
-1. 本文件中的已对齐 V1 产品语义与架构边界。
-2. 当前 Prototype 中已经确认的用户行为和 Human Gate。
-3. 经双方 Required Review 冻结后的 OpenSpec capability specs 与 JSON/OpenAPI contracts。
-4. 现有 `platform-v1-opengame-baseline`、旧 `specs/001-game-creation-mvp` 和 Prototype 内部类型，作为待迁移材料而非自动真相源。
+1. `docs/product/AI_COWORK_GAME_V1_DESIGN_SPEC.md` 中已批准的产品语义、V1 范围和 Human Gate。
+2. 经双方 Required Review 冻结后的 OpenSpec capability specs 与 JSON/OpenAPI contracts。
+3. 本 Catalog 的 roadmap、Change 边界、Owner 和依赖。
+4. 当前 Prototype 和已实现代码，作为 conformance evidence，不得反向覆盖已批准 contract。
+5. 现有 `platform-v1-opengame-baseline` 与旧 `specs/001-game-creation-mvp`，作为待迁移材料而非自动真相源。
 
 OpenSpec Explore 的第一项工作必须是显式列出冲突并决定更新、替换、sync 或 archive 哪一份旧 artifact；不得静默选择。
 
@@ -45,7 +47,7 @@ Implementation + Verification + PR
 - OpenSpec 是单个 Change 的需求、设计和 contract 事实源。
 - Superpowers 负责实施计划、TDD、执行、review 和 verification。
 - 禁止让 OpenSpec apply 与 Superpowers 同时负责同一份代码实现。
-- 不要把 C01-C19 一次性创建为一个巨型 OpenSpec Change。
+- 不要把 C01-C24 一次性创建为一个巨型 OpenSpec Change。
 
 ---
 
@@ -57,20 +59,21 @@ V1 支持：
 
 - 单用户、多个 Project。
 - Idea、Game Design、GameSpec 的独立 Human Gate。
-- 使用 OpenGame 生成真实浏览器游戏 artifact。
+- 生成真实 Phaser 2D 浏览器游戏 artifact；OpenGame 是首个真实 Build Provider，但不进入产品状态机词汇。
 - BuildCandidate 与当前 Playable 同时存在；失败不影响当前 Playable。
 - 用户 Promote BuildCandidate 后才创建 PlayableVersion。
 - 用户单独 Publish PlayableVersion 后才创建 Release。
 - Release 后产生 ResourceCandidate batch；用户审核后保存到“我的资源”。
-- 新项目可获得已保存玩法/UI/美术资源的确定性推荐；V1 只做明确 contract/规则匹配，不做语义 LLM 匹配。
+- 新项目可获得已保存玩法/UI/美术资源推荐，资源引用和批准实现上下文必须真正进入 Build Agent task-scoped context。
+- P0 与 P1 均属于 V1 必交付；仅按 Wave 1/Wave 2 排序。
 
 V1 不支持：
 
 - 多用户、团队权限和协作编辑。
 - Marketplace、社区资源和团队资源库。
-- 自研多 Agent runtime；它属于 V2。
+- 复杂自主 Multi-Agent 编排；V1 使用 One Agent Runtime 与 Game Design/GameSpec/Game Build profiles。
 - 分布式 worker、消息队列和通用 workflow engine。
-- 任意游戏引擎或任意 runtime；V1 使用固定的浏览器游戏交付约束和 OpenGameAdapter。
+- Unity、Godot、3D、原生游戏或多引擎；V1 固定 Phaser 2D 浏览器交付。
 - Agent 直接确认设计、Promote Playable、Publish Release 或保存资源。
 
 ### 1.2 唯一生命周期
@@ -224,7 +227,12 @@ OpenGame CLI
 | C16 | `release-publishing` | zhao | zhang | C14 | 与 C13 并行 |
 | C17 | `resource-review-library` | zhao | zhang | C16 | Resource reuse 后置 |
 | C18 | `cross-project-resource-reuse` | zhao | **zhang Required Review** | C05, C17 | 与部署准备部分并行 |
-| C19 | `game-creation-e2e-release` | zhao | **zhang Required Review** | C01-C18 | 最终集成 |
+| C20 | `git-project-content-versioning` | zhang | **zhao Required Review** | C02, C13 | 可与 C14-C18 API 开发并行 |
+| C21 | `blocking-build-amendment-drift` | zhao | **zhang Required Review** | C05-C07, C11 | 与 C20/C22 contract 并行 |
+| C22 | `asset-code-working-drafts` | zhao | **zhang Required Review** | C13-C15, C20, C21 | Assets/Code 共用 draft gate |
+| C23 | `release-distribution` | zhang | **zhao Required Review** | C16, C20 | 与 C17/C18 并行 |
+| C24 | `advanced-resource-build-context` | zhao | **zhang Required Review** | C06, C11, C17, C18 | matcher 与 adapter context 可并行 |
+| C19 | `game-creation-e2e-release` | zhao | **zhang Required Review** | C01-C18, C20-C24 | 最终集成；必须最后完成 |
 
 ---
 
@@ -353,7 +361,7 @@ Projects 页面展示并恢复多个真实 Project。
 
 **In Scope**
 
-- Game Design/GDD draft、clarification、choice/input、confirm API。
+- 动态 brainstorming、clarification、choice/input、Design Readiness、GDD draft 与 immutable confirmed GDD revision。
 - CreatorGameSpec schema、generation、revision、validation、confirm API。
 - Prototype 中已确认的中文优先 GameSpec 信息结构和关系资源所需明确字段。
 - CreatorGameSpec → RuntimeBuildSpec mapping contract 的输入侧。
@@ -369,19 +377,22 @@ Projects 页面展示并恢复多个真实 Project。
 - 未确认或 schema invalid 的 GameSpec 不能 Build。
 - GameSpec 不含 recommended/dismissed/used、drawer、resource id 等 UI workflow state。
 - canonical schema 与 Prototype ViewModel/旧 runtime schema 的 mapping 有 contract tests。
+- Confirmed GDD 和 Confirmed GameSpec 都不可原地覆盖；修改产生新 draft/revision。
+- Design Readiness 的缺口与未解决决定刷新后可恢复，未就绪时不能静默确认。
 
 ### C06 — `game-agent-contract`
 
 **Goal**
 
-冻结 BuildService 与 Game runtime 的 provider-neutral contract。
+冻结 Orchestrator/BuildService 与 One Agent Runtime profiles 的 provider-neutral contract。
 
 **Contract 最低内容**
 
 ```text
 GameBuildRequest:
   project_id, build_id, operation, creator_game_spec,
-  runtime_build_spec, workspace, baseline_playable, request_text
+  runtime_build_spec, workspace, baseline_playable, request_text,
+  affected_scope, resource_references, relevant_overrides
 
 GameBuildResult:
   status, artifact_manifest, preview_entry,
@@ -396,6 +407,7 @@ RunEvent:
 
 - BuildService 不知道 OpenGame 类型/命令/日志格式。
 - OpenGameAdapter 和 FakeGameAgent 通过同一 contract suite。
+- Game Design、GameSpec 和 Game Build profiles 使用同一 capability/version/error envelope；Verification 不作为 Agent profile。
 - Provider event 不能直接表达“已 Promote/已 Publish/已保存资源”。
 - 取消、timeout、invalid output 和 unsupported operation 有标准结果。
 
@@ -407,7 +419,7 @@ RunEvent:
 
 **In Scope**
 
-- Run/Event repository、sequence、REST status、SSE replay/reconnect。
+- Run/Event repository、sequence、REST status、SSE replay/reconnect，包括 `build.needs_input`、`build.phase_changed` 与 auto-fix events。
 - sanitized diagnostics、terminal event、取消/断连行为。
 
 **Out of Scope**
@@ -419,6 +431,7 @@ RunEvent:
 - 相同 run 的事件顺序稳定且可从 last sequence 重放。
 - 刷新/重连不创建新 run。
 - terminal state 与 DB 一致；不虚构 provider 未确认的成功。
+- `waiting_for_input` 不是 terminal；刷新/重连后保留 pending decision，不能创建新 run。
 
 **C07 implementation boundary (2026-08-14)**
 
@@ -498,7 +511,7 @@ output: stdout, stderr, exit_code, process_status, duration
 **In Scope**
 
 - POST/query/cancel/retry Build、single active build rule、BuildService、FakeGameAgent integration。
-- confirmed spec 和 baseline Playable 固定为 build input。
+- confirmed spec、baseline Playable、affected scope、resource references 和 relevant overrides 固定为 task-scoped build input。
 - GameBuildResult 成功后创建 BuildCandidate；失败保留 diagnostics。
 
 **Out of Scope**
@@ -511,6 +524,7 @@ output: stdout, stderr, exit_code, process_status, duration
 - BuildService 只调用 GameAgent Contract。
 - 成功只创建 BuildCandidate；失败/取消不修改 current Playable。
 - 后端重启不会让 run 永久卡在 running。
+- Accepted SavedResource 必须进入 immutable build input 和 Candidate provenance，不能只存在于 UI workflow state。
 
 **C11 implementation evidence (2026-08-14)**
 
@@ -528,7 +542,9 @@ output: stdout, stderr, exit_code, process_status, duration
 **In Scope**
 
 - artifact build、浏览器启动、console、核心输入/玩法/完成条件检查。
-- TestReport schema、evidence、pass/fail/invalid、repair ancestry。
+- VerificationResult/TestReport schema、evidence、`PASSED/PARTIAL_FAILURE/CRITICAL_FAILURE/INVALID`、repair ancestry。
+- Build Check、真实 Browser Smoke、Core Gameplay Acceptance 与标准 Phaser `window.__GAME_TEST__` hook。
+- 最多三轮自动修复，每轮创建独立 Candidate attempt 和 evidence。
 - 平台验证 evidence 完整性，不信任 runtime 自报 PASS。
 
 **Acceptance**
@@ -536,6 +552,7 @@ output: stdout, stderr, exit_code, process_status, duration
 - 缺少证据、矛盾报告或 build failure 不能 Ready to Promote。
 - repair 创建新 Candidate attempt，不覆盖旧失败记录。
 - 测试失败不影响 current Playable。
+- runtime 自报 PASS、缺失 test hook 或 Human Play Review 未接受都不能 Promote。
 
 **C12 implementation evidence (2026-08-14)**
 
@@ -566,7 +583,7 @@ output: stdout, stderr, exit_code, process_status, duration
 
 **Goal**
 
-用户把 Ready BuildCandidate Promote 为新的不可变 PlayableVersion，并支持安全 Restore。
+用户在平台验证后完成 Human Play Review，把接受的 BuildCandidate Promote 为新的不可变 PlayableVersion，并支持安全 Restore。
 
 **In Scope**
 
@@ -575,7 +592,7 @@ output: stdout, stderr, exit_code, process_status, duration
 
 **Acceptance**
 
-- TestReport 非 PASS 或 Candidate 非 ready 时拒绝 Promote。
+- Verification 非 `PASSED`、Human Play Review 未接受、Amendment 未确认或存在 unresolved semantic drift 时拒绝 Promote。
 - Promote 原子创建 PlayableVersion 并更新 pointer；重复请求幂等。
 - Restore 不 reset/改写历史，并经过 Candidate/Test gate。
 
@@ -587,7 +604,7 @@ Workspace 使用真实 API、SSE 和 artifact URL 显示 Build、BuildCandidate�
 
 **In Scope**
 
-- Build status/progress、cancel/retry、Candidate preview、Playable preview、Promote gate、history/restore 状态。
+- Build status/progress、cancel/retry/needs-input、Candidate preview、Human Play Review、Playable preview、Promote gate、history/restore 状态。
 - 离开 Workspace 后后台 Build 继续，返回后从 API 恢复。
 
 **Acceptance**
@@ -605,7 +622,7 @@ Workspace 使用真实 API、SSE 和 artifact URL 显示 Build、BuildCandidate�
 
 **In Scope**
 
-- Release draft/review/publish/error/retry、name/description、based-on references、Release detail。
+- Release draft/Publish Review/publish/error/retry、name/description、based-on references、relevant overrides、Release detail。
 - Publish 后触发 release-scoped ResourceCandidate extraction job/batch creation。
 
 **Acceptance**
@@ -638,17 +655,17 @@ Workspace 使用真实 API、SSE 和 artifact URL 显示 Build、BuildCandidate�
 
 **Goal**
 
-在新 Project 的 GameSpec 中推荐并使用已保存资源，同时保持 GameSpec 与 UI workflow state 分离。
+在新 Project 的 GameSpec 中推荐并使用已保存资源，同时保持 GameSpec、resource reference 与 UI workflow state 分离。
 
 **In Scope**
 
 - SavedResource compatibility/match contract、推荐/dismiss/use/cancel workflow state。
 - 关系类资源的 machine-readable defaults 和 first-use immutable relationship snapshot。
-- provenance 和使用记录。
+- provenance、`resource_reference` 和 Build Context 使用记录。
 
 **Out of Scope**
 
-- LLM semantic matching、真正代码注入、复杂参数映射、Marketplace。
+- Marketplace、团队资源和任意未审核脚本执行。
 
 **Acceptance**
 
@@ -656,6 +673,94 @@ Workspace 使用真实 API、SSE 和 artifact URL 显示 Build、BuildCandidate�
 - dismissed 在导航和普通 revision 后保持。
 - use 只改资源声明拥有的 GameSpec 字段；cancel 只恢复这些字段。
 - resource id、recommended/dismissed/used 和 drawer state 不写进 CreatorGameSpec。
+- use 产生独立 resource reference；后续 Build 必须把批准的 capability/implementation context 交给 Game Build profile。
+
+### C20 — `git-project-content-versioning`
+
+**Goal**
+
+建立 Project Git 内容事实源和可追踪 checkpoint，使 GDD、GameSpec、代码、素材、Playable 与 Release 可恢复且不与数据库工作流状态混淆。
+
+**In Scope**
+
+- Project repository 初始化、受控文件布局、commit/tag/checkpoint service。
+- Confirm GDD、Confirm GameSpec、Promote、Publish checkpoint。
+- Git commit、artifact checksum、数据库 entity provenance 映射。
+
+**Acceptance**
+
+- SQLite 仍拥有 jobs、gate、pointer 和 index；Git 不承担业务状态机。
+- 每个 PlayableVersion/Release 可解析到不可变 commit 与 artifact，服务重启后仍可恢复。
+- runtime workspace 无权访问平台仓库或未批准 secrets。
+
+### C21 — `blocking-build-amendment-drift`
+
+**Goal**
+
+处理 Build 中的阻塞设计决定、GameSpec Amendment 与轻量 Drift Detection，避免实现悄悄改变已确认游戏语义。
+
+**In Scope**
+
+- `waiting_for_input`、Blocking Build Decision、continuation run。
+- GameSpec Amendment Draft/confirm/reject、implementation override、semantic drift classification。
+- Promote/Publish 阻断规则。
+
+**Acceptance**
+
+- blocking decision 刷新后仍存在且不重复启动 Build。
+- design-semantic 变化必须确认 Amendment；implementation-only 变化保留 override provenance。
+- unresolved semantic drift 不能 Promote 或 Publish。
+
+### C22 — `asset-code-working-drafts`
+
+**Goal**
+
+在 Playable Workspace 中提供 Assets 与 Code Working Draft、Diff、Apply/Discard，并统一走 Candidate/Verification/Promote。
+
+**In Scope**
+
+- Asset replacement/edit draft、Code/Monaco draft、文件 Diff、Apply/Discard。
+- draft workspace isolation、change impact、Candidate creation。
+
+**Acceptance**
+
+- draft 不修改 current Playable；Discard 不留业务状态副作用。
+- Apply 创建新 Candidate，并经过平台 Verification、Human Play Review 和 Promote。
+- semantic change 自动进入 C21 Amendment/Drift gate。
+
+### C23 — `release-distribution`
+
+**Goal**
+
+为 immutable Release 提供 Play Release、Share Link、Build ZIP 和 Source ZIP。
+
+**In Scope**
+
+- Release artifact packaging、source export allowlist、share token/link、download metadata。
+- checksum、Git commit、PlayableVersion 与 Release provenance。
+
+**Acceptance**
+
+- 后续 Playable 修改不改变旧 Release 的链接或 ZIP 内容。
+- Source ZIP 不包含 secrets、平台源码、未批准 workspace 或其他 Project 内容。
+- 分享和下载失败不修改 Release 或 current Playable。
+
+### C24 — `advanced-resource-build-context`
+
+**Goal**
+
+实现 richer resource matching、参数适配和可审计的 capability/implementation context assembly，使资源在跨项目 Build 中真正产生作用。
+
+**In Scope**
+
+- compatibility signals、structured/semantic matching boundary、参数映射建议与 Human acceptance。
+- resource capability、implementation refs/dependencies、task-scoped Build Context 和 consumption evidence。
+
+**Acceptance**
+
+- 推荐原因、适配字段和实现依赖可解释且可撤销。
+- 未接受资源或不兼容实现不得进入 Build Context。
+- Candidate 能追踪实际消费的 SavedResource revision；只显示推荐但未进入 Build 的情况不能标记为 reused。
 
 ### C19 — `game-creation-e2e-release`
 
@@ -666,11 +771,12 @@ Workspace 使用真实 API、SSE 和 artifact URL 显示 Build、BuildCandidate�
 **Required Flow**
 
 ```text
-Idea → Game Design → GameSpec → OpenGame Build
-→ BuildCandidate → TestReport PASS → Human Promote
-→ PlayableVersion → Human Publish → Release
+Idea → Brainstorming → GDD → GameSpec → Real Runtime Build
+→ BuildCandidate → Platform Verification → Human Play Review → Human Promote
+→ PlayableVersion → Change/Assets/Code Draft → New PlayableVersion
+→ Publish Review → Release → Share/Build ZIP/Source ZIP
 → Resource Review → SavedResource
-→ 新 Project GameSpec 推荐/使用 SavedResource
+→ 新 Project GameSpec 推荐/使用 SavedResource → Build Agent Context → Candidate
 ```
 
 **Acceptance**
@@ -679,6 +785,8 @@ Idea → Game Design → GameSpec → OpenGame Build
 - 实际调用固定版本 OpenGame，产生真实 preview entry/artifact。
 - Candidate、TestReport、PlayableVersion、Release provenance 可追踪。
 - failure/cancel/retry/refresh 均不破坏 current Playable。
+- waiting-for-input、Amendment、Drift、Restore、Working Draft 与三轮 repair 均有真实 browser acceptance evidence。
+- Git checkpoint、Release downloads 和 resource consumption provenance 从 UI/API 可追踪。
 - typecheck、unit、integration、contract、browser E2E、clean-environment build 全部通过。
 - 记录完整 setup、recovery、health、artifact hosting 和 demo rehearsal 证据。
 
@@ -705,16 +813,22 @@ Wave 3
 
 Wave 4
   zhao:  C12 Test Gate → C14 Promotion → C15 Workspace
-  zhang: C10/C13 hardening + contract/integration tests
+  zhang: C10/C13 hardening → C20 Git Content Versioning
 
 Wave 5
-  zhao:  C16 Release → C17 Resources → C18 Reuse
-  zhang: runtime failure/cancel/security verification
+  zhao:  C16 Release → C17 Resources → C18 Reuse → C21 Amendment/Drift
+  zhang: C20 checkpoints → C23 Release Distribution
 
 Wave 6
-  zhao:  C19 E2E / Demo Owner
-  zhang: C19 Required Review / runtime diagnostics
+  zhao:  C22 Assets/Code Drafts → C24 Advanced Resource Build Context
+  zhang: runtime failure/cancel/security verification + C22/C24 Required Review
+
+Wave 7
+  zhao:  C19 Complete V1 E2E / Demo Owner
+  zhang: C19 Required Review / runtime diagnostics / clean-environment rehearsal
 ```
+
+Wave 1-5 优先形成持续可运行的纵向主链，Wave 6 补齐 Design Spec 原 P1 能力；两者都属于 V1 完成条件。不得在 Wave 5 后把产品标记为 V1 Done。
 
 允许的 Change 内并行：
 

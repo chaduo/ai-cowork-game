@@ -1173,7 +1173,10 @@ textarea:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(23, 111, 166,
 .build-preview-view > header p,
 .asset-gallery-readonly > header p,
 .code-readonly-state header p { margin: 5px 0 0; color: var(--color-text-muted); font-size: 11px; line-height: 18px; }
+.build-view-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 .working-build-status { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; padding: 7px 9px; color: var(--color-accent); font: 600 9px/1 var(--font-mono); background: var(--color-accent-soft); border: 1px solid #a9c9da; border-radius: 3px; }
+.cancel-build-button { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; color: var(--color-text-muted); font-size: 10px; background: var(--color-surface); border: 1px solid var(--color-line-strong); border-radius: 3px; cursor: pointer; }
+.cancel-build-button:hover { color: var(--color-ink); border-color: var(--color-accent); }
 
 .build-view-grid { display: grid; grid-template-columns: 245px minmax(0, 1fr); min-height: 420px; margin-top: 24px; background: var(--color-surface); border: 1px solid var(--color-line); }
 .build-ledger { position: relative; margin: 0; padding: 17px 0; list-style: none; border-right: 1px solid var(--color-line); }
