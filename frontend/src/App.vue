@@ -8,7 +8,7 @@ import type { ConfirmedGameDesign } from './components/kickoff/kickoffTypes'
 import type { ReleaseRecord } from './components/workspace/releaseTypes'
 import { appendPlayableVersion, completeGeneration, configureDemoRuntime, createProject, getActiveProject, getPendingResourceCount, openProject, projectStore, setProjectDesignStatus, startGeneration, updateSavedResourceMetadata } from './stores/projectStore'
 import { seedDemo, type AppSurface } from './stores/demoSeeds'
-import { getProjectRecord, listProjectRecords, type ProjectResponse } from './api/client'
+import { getProjectDesign, getProjectRecord, listProjectRecords, type ProjectResponse } from './api/client'
 
 function parseDemoFlags(search: string) {
   const params = new URLSearchParams(search)
@@ -35,6 +35,7 @@ const pendingResourceCount = computed(() => activeProject.value ? getPendingReso
 const projectRecords = ref<ProjectResponse[] | null>(requestedScreen ? null : [])
 const projectsLoading = ref(!requestedScreen)
 const projectListError = ref<string | null>(null)
+const designResumeProjectId = ref<string | null>(null)
 
 function designFromRecord(record: ProjectResponse): ConfirmedGameDesign {
   return {
@@ -132,6 +133,18 @@ async function enterWorkspace(design: ConfirmedGameDesign, projectId: string) {
 }
 
 async function openWorkspace(projectId: string) {
+  try {
+    const designResponse = await getProjectDesign(projectId)
+    if (designResponse.status !== 'confirmed') {
+      designResumeProjectId.value = projectId
+      surface.value = 'projects'
+      return
+    }
+  } catch (cause) {
+    if (!(cause instanceof Error && 'code' in cause && (cause as { code?: string }).code === 'project_not_found')) {
+      // Offline demo/local sessions can still be opened from the in-memory store.
+    }
+  }
   if (!openProject(projectId)) {
     try {
       const record = await getProjectRecord(projectId)
@@ -150,5 +163,5 @@ async function openWorkspace(projectId: string) {
   <MyResources v-if="surface === 'resources'" @projects="surface = 'projects'" @update-metadata="updateSavedMetadata" />
   <ResourceReviewWorkspace v-else-if="surface === 'review' && reviewedRelease && activeProject" :project-id="activeProject.id" :project-name="activeProject.spec.title" :release="reviewedRelease" @back="closeResourceReview()" @resources="closeResourceReview('resources')" @projects="closeResourceReview('projects')" />
   <K02ProjectWorkspace v-else-if="surface === 'workspace' && activeProject" :key="activeProject.id" :design="activeProject.design" :resource-pending-count="pendingResourceCount" @back="surface = 'projects'" @resources="surface = 'resources'" @review-resources="openResourceReview" />
-  <K01CreateProject v-else :projects="projectStore.projects" :remote-projects="projectRecords" :projects-loading="projectsLoading" :project-list-error="projectListError" @open-project="openWorkspace" @enter-workspace="enterWorkspace" @resources="surface = 'resources'" />
+  <K01CreateProject v-else :projects="projectStore.projects" :remote-projects="projectRecords" :resume-project-id="designResumeProjectId" :projects-loading="projectsLoading" :project-list-error="projectListError" @open-project="openWorkspace" @enter-workspace="enterWorkspace" @resume-consumed="designResumeProjectId = null" @resources="surface = 'resources'" />
 </template>

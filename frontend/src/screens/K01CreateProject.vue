@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import {
   ArrowDown,
   ArrowRight,
@@ -20,10 +20,11 @@ import type { CreatorGameDesignDraft } from '../contracts/creatorGameDesign'
 const props = defineProps<{
   projects: ProjectSession[]
   remoteProjects?: ProjectResponse[] | null
+  resumeProjectId?: string | null
   projectsLoading?: boolean
   projectListError?: string | null
 }>()
-const emit = defineEmits<{ enterWorkspace: [design: ConfirmedGameDesign, projectId: string]; openProject: [projectId: string]; resources: [] }>()
+const emit = defineEmits<{ enterWorkspace: [design: ConfirmedGameDesign, projectId: string]; openProject: [projectId: string]; resumeConsumed: []; resources: [] }>()
 
 type GameTemplate = {
   id: string
@@ -131,6 +132,27 @@ const projects = computed<ProjectListItem[]>(() => {
   return [...local, ...remoteOnly].sort((left, right) => right.updatedAt - left.updatedAt)
 })
 
+watch(
+  () => props.resumeProjectId,
+  async (projectId) => {
+    if (!projectId) return
+    const record = (props.remoteProjects ?? []).find((project) => project.id === projectId)
+    if (!record) return
+    error.value = null
+    backendProjectId.value = projectId
+    kickoffIdea.value = record.original_idea
+    idea.value = record.original_idea
+    try {
+      kickoffDraft.value = (await getProjectDesign(projectId)).draft
+      kickoffStarted.value = true
+      kickoffOpen.value = true
+      emit('resumeConsumed')
+    } catch (cause) {
+      error.value = cause instanceof ApiClientError ? cause.message : '暂时无法恢复这次设计澄清。'
+    }
+  },
+)
+
 function projectStage(project: ProjectSession): string {
   if (project.releases.length > 0) return 'Released'
   if (project.playableVersions.length > 0) return 'Playable'
@@ -185,6 +207,7 @@ async function createProject() {
     kickoffStarted.value = false
     backendProjectId.value = null
     idempotencyKey.value = null
+    kickoffDraft.value = null
     await nextTick()
   }
   if (!kickoffStarted.value) {

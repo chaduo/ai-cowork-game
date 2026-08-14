@@ -308,6 +308,9 @@ textarea:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(23, 111, 166,
 .project-list-state-kicker { color: var(--color-accent); font: 600 9px/1 var(--font-mono); letter-spacing: .08em; }
 .project-list-state strong { color: var(--color-ink); font-size: 14px; }
 .project-list-state small { color: var(--color-text-muted); font-size: 11px; }
+.gamespec-api-status, .gamespec-api-error { margin: 10px 0 0; padding: 8px 12px; font-size: 11px; }
+.gamespec-api-status { color: var(--color-accent); background: var(--color-accent-soft); border: 1px solid #bdd5e3; }
+.gamespec-api-error { color: var(--color-failed); background: #fbe9e4; border: 1px solid #e5c1b9; }
 
 .creator-hero {
   position: relative;
