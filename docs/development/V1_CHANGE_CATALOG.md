@@ -532,6 +532,7 @@ output: stdout, stderr, exit_code, process_status, duration
 - `FakeGameAgent` is the deterministic provider used by the C11 service/API tests; no OpenGame subprocess or log parser is included.
 - Stable `build_id`/`run_id`, single-active-build guard, retry ancestry, cancellation, terminal diagnostics and orphan recovery are covered by `backend/tests/test_c11_build_orchestration.py` and `backend/tests/test_c11_build_api.py`.
 - Success creates a `BuildCandidate` only; no code in C11 changes `Project.current_playable_version_id`, creates a `PlayableVersion`, or publishes a `Release`.
+- Corrective context evidence: migration `0009_c11_build_context` stores canonical GameSpec/RuntimeBuildSpec hashes, affected scope, resource references, implementation dependencies and overrides before provider invocation; `BuildCandidate.build_context_id` preserves the provenance link across refresh and retry.
 
 ### C12 — `candidate-test-gate`
 

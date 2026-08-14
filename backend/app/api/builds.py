@@ -8,8 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents.fake_game_agent import FakeGameAgent
+from app.contracts.game_agent import AffectedScope, BuildOverride, ResourceReference
 from app.errors import ApiError
-from app.models import Build, BuildCandidate, Project, Run
+from app.models import Build, BuildCandidate, BuildContext, Project, Run
 from app.services.builds import BuildService
 
 
@@ -21,6 +22,10 @@ class CreateBuildRequest(BaseModel):
     run_id: str | None = Field(default=None, min_length=1, max_length=120)
     operation: str = Field(default="create", min_length=1, max_length=80)
     request_text: str = Field(default="", max_length=4000)
+    affected_scope: AffectedScope = Field(default_factory=AffectedScope)
+    resource_references: list[ResourceReference] = Field(default_factory=list, max_length=128)
+    implementation_dependencies: list[str] = Field(default_factory=list, max_length=128)
+    relevant_overrides: list[BuildOverride] = Field(default_factory=list, max_length=128)
 
 
 class BuildResponse(BaseModel):
@@ -41,6 +46,8 @@ class BuildResponse(BaseModel):
     diagnostics: list[dict] = Field(default_factory=list)
     error_code: str | None = None
     error_message: str | None = None
+    build_context_id: str | None = None
+    build_context_hash: str | None = None
 
 
 def _session(request: Request) -> Session:
@@ -60,6 +67,7 @@ def _records(session: Session, build_id: str) -> tuple[Build, Run, BuildCandidat
 
 def _response(session: Session, build_id: str) -> BuildResponse:
     build, run, candidate = _records(session, build_id)
+    context = session.scalar(select(BuildContext).where(BuildContext.build_id == build.id))
     diagnostics = []
     if candidate and candidate.diagnostics_json:
         diagnostics = json.loads(candidate.diagnostics_json)
@@ -81,6 +89,8 @@ def _response(session: Session, build_id: str) -> BuildResponse:
         diagnostics=diagnostics,
         error_code=build.failure_code,
         error_message=build.failure_message,
+        build_context_id=context.id if context else None,
+        build_context_hash=context.context_hash if context else None,
     )
 
 
@@ -105,6 +115,10 @@ async def create_build(project_id: str, payload: CreateBuildRequest, request: Re
                 request_text=payload.request_text,
                 build_id=payload.build_id,
                 run_id=payload.run_id,
+                affected_scope=payload.affected_scope,
+                resource_references=payload.resource_references,
+                implementation_dependencies=payload.implementation_dependencies,
+                relevant_overrides=payload.relevant_overrides,
             )
             session.commit()
             await service.execute_build(job.build_id)

@@ -7,7 +7,7 @@
 **Reviewer:** zhang（Required Review）
 **Priority:** P0
 **Depends On:** C05, C06, C07 corrective contracts
-**Status:** Backlog
+**Status:** Implemented on `codex/c11-build-job-orchestration`
 
 ## 2. Goal
 
@@ -40,3 +40,11 @@
 **Given** a successful provider result
 **When** the Build finishes
 **Then** exactly one Candidate references the stored context and current Playable remains unchanged.
+
+## Implementation Evidence
+
+- Migration `0009_c11_build_context` adds one immutable `BuildContext` per Build and links `BuildCandidate.build_context_id`.
+- Canonical CreatorGameSpec/RuntimeBuildSpec snapshots and SHA-256 hashes are captured before the first provider call.
+- A Build request carries affected scope, accepted resource references, implementation dependencies and relevant overrides; duplicate requests cannot replace them.
+- Provider requests are reconstructed from the stored context after refresh/restart, and retry creates a copied context without mutating the parent.
+- C11 focused tests: `17 passed`; full backend: `118 passed, 1 warning`; frontend build passed.
