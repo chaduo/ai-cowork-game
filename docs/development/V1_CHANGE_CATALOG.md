@@ -555,13 +555,13 @@ output: stdout, stderr, exit_code, process_status, duration
 - 测试失败不影响 current Playable。
 - runtime 自报 PASS、缺失 test hook 或 Human Play Review 未接受都不能 Promote。
 
-**C12 implementation evidence (2026-08-14)**
+**C12 implementation evidence (2026-08-14; corrective conformance update)**
 
-- `TestReport` and immutable `TestEvidence` records are persisted by migration `0006_candidate_test_gate`; BuildCandidate stores `test_gate_status`, `parent_candidate_id`, and `attempt`.
-- `CandidateTestService` computes the authoritative platform verdict from required browser, console, input, gameplay and completion evidence. Runtime PASS alone cannot produce `ready`.
-- Deterministic `FakeCandidateTestRunner` covers pass, missing evidence, contradiction, console failure, completion failure and runtime-only PASS without adding Playwright or OpenGame runtime dependencies.
-- Repair links a new C11 retry Candidate to a failed/invalid parent without overwriting the parent; C12 never changes `current_playable_version_id`, creates PlayableVersion, publishes Release, or adds Workspace UI.
-- C12 service/API tests cover 10 gate/repair cases and 4 API cases; full backend regression is recorded in the verification artifact.
+- `TestReport` and immutable `TestEvidence` records remain persisted by `0006_candidate_test_gate`; migration `0010_c12_verification_conformance` adds canonical severity, platform/runtime evidence source, and `repair_round`.
+- `CandidateTestService` derives `PASSED`, `PARTIAL_FAILURE`, `CRITICAL_FAILURE`, or `INVALID` from a platform-owned Build Check, Browser Smoke, Core Gameplay Acceptance, safe artifact references, and validated `window.__GAME_TEST__` evidence. Runtime PASS alone cannot produce `ready`.
+- Deterministic `FakeCandidateTestRunner` covers pass, missing evidence, contradiction, runtime-only PASS, invalid artifact, hook failure, partial failure, console failure and completion failure without adding Playwright or OpenGame runtime dependencies.
+- Repair links a new C11 retry Candidate to a failed/invalid parent for at most three repair rounds without overwriting the parent; C12 never changes `current_playable_version_id`, creates PlayableVersion, publishes Release, or adds Workspace UI.
+- C12 corrective service/API/schema tests cover 20 focused cases; full backend regression (122 tests), migration repeatability and frontend build are recorded in the verification artifact.
 
 ### C13 — `runtime-workspace-isolation`
 

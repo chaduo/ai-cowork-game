@@ -7,7 +7,7 @@
 **Reviewer:** zhang（Required Review）
 **Priority:** P0
 **Depends On:** C11 build context; C08-C10 runtime evidence
-**Status:** Backlog
+**Status:** Implemented on `codex/c12-verification-conformance`
 
 ## 2. Goal
 
@@ -19,7 +19,7 @@
 - Build Check, Browser Smoke and Core Gameplay Acceptance evidence.
 - Standard Phaser `window.__GAME_TEST__` hook validation.
 - Reject missing, contradictory, runtime-only PASS and invalid artifact evidence.
-- Repair ancestry and hard maximum of three attempts.
+- Repair ancestry and hard maximum of three repair rounds.
 - Keep failed/partial candidates away from current Playable.
 
 ## 4. Out of Scope
@@ -47,3 +47,19 @@
 **Given** three repair attempts already exist
 **When** another automatic repair is requested
 **Then** it is rejected, and all prior candidates and evidence remain immutable.
+
+## 6. Implementation evidence (2026-08-14)
+
+- Migration `0010_c12_verification_conformance` adds report/evidence severity,
+  platform/runtime evidence source, and the explicit `repair_round` counter.
+- `CandidateTestService` derives `PASSED`, `PARTIAL_FAILURE`,
+  `CRITICAL_FAILURE`, or `INVALID` from platform-owned Build Check, Browser
+  Smoke, Core Gameplay Acceptance, safe artifact references, and the
+  `window.__GAME_TEST__` hook.
+- Runtime-only PASS, contradictory evidence, missing checks, unsafe artifact
+  references and unvalidated hooks never mark a Candidate ready.
+- Repair ancestry permits at most three repair rounds; every replacement is a
+  new Candidate attempt and existing reports remain immutable.
+- Verification: 20 focused C12 tests, 122 backend tests, repeatable Alembic
+  upgrade, and frontend typecheck/Vite build passed. The existing Starlette /
+  httpx deprecation warning remains unrelated.

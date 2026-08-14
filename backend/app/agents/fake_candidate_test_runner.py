@@ -4,7 +4,16 @@ from app.contracts.test_report import CandidateTestEvidence, RuntimeTestResult
 from app.models import BuildCandidate
 
 
-REQUIRED_EVIDENCE = ("browser_started", "console", "core_input", "gameplay", "completion")
+REQUIRED_EVIDENCE = ("browser_started", "console", "core_input", "gameplay", "completion", "phaser_hook")
+
+_GROUPS = {
+    "browser_started": "browser_smoke",
+    "console": "browser_smoke",
+    "core_input": "core_gameplay",
+    "gameplay": "core_gameplay",
+    "completion": "core_gameplay",
+    "phaser_hook": "core_gameplay",
+}
 
 
 class FakeCandidateTestRunner(CandidateTestRunner):
@@ -18,19 +27,35 @@ class FakeCandidateTestRunner(CandidateTestRunner):
             CandidateTestEvidence(
                 kind=kind,
                 status="passed",
+                source="platform",
+                severity="critical",
                 expected=f"{kind} passes",
                 observed=f"{kind} observed",
                 artifact_ref=candidate.artifact_path or "dist/index.html",
+                details={
+                    "check_group": _GROUPS[kind],
+                    **(
+                        {"test_hook": "window.__GAME_TEST__", "hook_validated": True}
+                        if kind == "phaser_hook"
+                        else {}
+                    ),
+                },
             )
             for kind in REQUIRED_EVIDENCE
         ]
         if self.fixture == "missing_evidence":
-            evidence = [item for item in evidence if item.kind != "completion"]
+            evidence = [item for item in evidence if item.kind not in {"completion", "phaser_hook"}]
             return RuntimeTestResult(verdict="pass", evidence=evidence)
         if self.fixture == "runtime_only_pass":
-            return RuntimeTestResult(verdict="pass", evidence=[])
+            return RuntimeTestResult(
+                verdict="pass",
+                evidence=[item.model_copy(update={"source": "runtime"}) for item in evidence],
+            )
         if self.fixture == "contradictory":
             return RuntimeTestResult(verdict="fail", evidence=evidence)
+        if self.fixture == "invalid_artifact":
+            evidence[0] = evidence[0].model_copy(update={"artifact_ref": "../outside/index.html"})
+            return RuntimeTestResult(verdict="pass", evidence=evidence)
         if self.fixture == "console_failure":
             evidence[1] = evidence[1].model_copy(update={"status": "failed", "observed": "console error observed"})
             return RuntimeTestResult(
@@ -45,6 +70,16 @@ class FakeCandidateTestRunner(CandidateTestRunner):
                 evidence=evidence,
                 diagnostics=[Diagnostic(level="error", code="completion_failed", message="Completion condition was not observed")],
             )
+        if self.fixture == "partial_failure":
+            evidence[1] = evidence[1].model_copy(
+                update={"status": "failed", "severity": "partial", "observed": "supporting browser signal missing"}
+            )
+            return RuntimeTestResult(verdict="fail", evidence=evidence)
+        if self.fixture == "hook_failure":
+            evidence[-1] = evidence[-1].model_copy(
+                update={"status": "failed", "observed": "window.__GAME_TEST__ unavailable"}
+            )
+            return RuntimeTestResult(verdict="fail", evidence=evidence)
         if self.fixture != "pass":
             raise ValueError(f"unknown fake test fixture: {self.fixture}")
         return RuntimeTestResult(verdict="pass", evidence=evidence)
