@@ -42,3 +42,21 @@ Changed files are limited to the design/GameSpec contract, lifecycle service/API
 ## Reviewer gate
 
 A human reviewer should inspect the migration backfill policy and confirm that the client can display readiness blockers before allowing Confirm GDD in the production flow. C05 does not add UI presentation for blockers; it only makes the contract and server gate explicit.
+
+## Follow-up UI contract fix
+
+The kickoff modal now maps its `ready`/`confirming`/`confirmed` clarification phase to `readiness.status = "ready"` before calling the Design API. This prevents the backend's intentional `design_not_ready` response when the UI has reached `GAME DESIGN READY`; in particular, the in-flight confirmation save cannot downgrade the draft to `not_ready`. The mapping is covered by the dependency-free Node contract test:
+
+```text
+node --experimental-strip-types --test frontend/tests/designReadiness.test.mjs
+# 3 passed
+```
+
+## Follow-up refresh recovery
+
+When a persisted local session is still `generating` but the backend has no GameSpec yet, the expected API response is `gamespec_not_found` (HTTP 404). K02 now treats that response as an interrupted deterministic generation, resumes the generation timer, and reaches `review`; it does not restart sessions that already have a draft or confirmed GameSpec.
+
+```text
+node --experimental-strip-types --test frontend/tests/gamespecRecovery.test.mjs
+# 2 passed
+```

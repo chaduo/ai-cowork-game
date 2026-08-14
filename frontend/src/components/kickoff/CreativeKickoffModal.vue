@@ -11,6 +11,7 @@ import ThinkingIndicator from './ThinkingIndicator.vue'
 import { buildScenarioSummary, getFollowUpQuestion, iterationDirections, iterationQuestions, resolveKickoffScenario } from './kickoffFixtures'
 import type { Choice, ConfirmedGameDesign, Decision, KickoffPhase, Question } from './kickoffTypes'
 import type { CreatorGameDesignDraft } from '../../contracts/creatorGameDesign'
+import { clarificationStatusForPhase, readinessForDesignStatus } from '../../contracts/designReadiness'
 
 const props = withDefaults(
   defineProps<{
@@ -75,11 +76,7 @@ function restoreDraft(draft: CreatorGameDesignDraft | null) {
 }
 
 function currentDraft(): CreatorGameDesignDraft {
-  const status = phase.value === 'ready' || phase.value === 'confirmed'
-    ? 'ready'
-    : phase.value === 'iterating' || phase.value === 'iterating-question'
-      ? 'iterating'
-      : 'clarifying'
+  const status = clarificationStatusForPhase(phase.value)
   return {
     schema_version: 1,
     original_idea: props.originalIdea,
@@ -104,6 +101,7 @@ function currentDraft(): CreatorGameDesignDraft {
       status,
       custom_input: iterationNote.value ?? '',
     },
+    readiness: readinessForDesignStatus(status),
   }
 }
 

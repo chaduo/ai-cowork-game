@@ -23,6 +23,7 @@ import type { ReleaseDraft, ReleasePhase, ReleaseRecord } from '../components/wo
 import type { ArtifactTab, SpecContext } from '../components/workspace/workspaceTypes'
 import { ApiClientError, confirmProjectGameSpec, getProjectDesign, getProjectGameSpec, saveProjectGameSpec } from '../api/client'
 import { creatorGameSpecFromViewModel, gameSpecViewModelFromCreator } from '../contracts/creatorGameSpecMapping'
+import { shouldResumeGameSpecGeneration } from '../contracts/gamespecRecovery'
 import {
   applyControlledChange as applyProjectControlledChange,
   applySpecRevision,
@@ -350,7 +351,11 @@ onMounted(async () => {
           else confirmSpecAndStartBuild(session.id)
         }
       } catch (cause) {
-        if (!(cause instanceof ApiClientError && cause.code === 'gamespec_not_found')) {
+        if (cause instanceof ApiClientError && cause.code === 'gamespec_not_found') {
+          if (shouldResumeGameSpecGeneration(session.phase, session.gamespecStatus)) {
+            startGeneration(session.id)
+          }
+        } else {
           gamespecError.value = cause instanceof ApiClientError ? cause.message : '暂时无法读取 GameSpec。'
         }
       }
