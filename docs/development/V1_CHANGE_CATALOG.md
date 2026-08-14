@@ -420,6 +420,14 @@ RunEvent:
 - 刷新/重连不创建新 run。
 - terminal state 与 DB 一致；不虚构 provider 未确认的成功。
 
+**C07 implementation boundary (2026-08-14)**
+
+- `RunRepository` owns idempotent run creation, exact event sequence, sanitization, terminal transitions,
+  cancellation requests, and orphan recovery.
+- REST status, JSON replay, SSE replay/reconnect, and cancellation are exposed under `/api/v1/runs`.
+- C11 remains responsible for connecting BuildService/GameAgent execution to these repository methods; C07 does
+  not parse OpenGame logs, create Candidates, or promote Versions.
+
 ### C08 — `opengame-cli-spike`
 
 **Goal**
