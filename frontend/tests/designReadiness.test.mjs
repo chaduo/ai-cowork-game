@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { readinessForDesignStatus } from '../src/contracts/designReadiness.ts'
+import { clarificationStatusForPhase, readinessForDesignStatus } from '../src/contracts/designReadiness.ts'
 
 test('ready design phase produces a confirmable readiness contract', () => {
   assert.deepEqual(readinessForDesignStatus('ready'), {
@@ -19,4 +19,8 @@ test('clarifying design phase remains blocked from confirmation', () => {
     unresolved_decisions: [],
     checked_at: null,
   })
+})
+
+test('confirming phase keeps the ready contract while the API request is in flight', () => {
+  assert.equal(clarificationStatusForPhase('confirming'), 'ready')
 })
