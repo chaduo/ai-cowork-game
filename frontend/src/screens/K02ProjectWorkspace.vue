@@ -31,6 +31,7 @@ import {
   requestSpecConfirmation,
   requestSpecRevision,
   retryBuild,
+  cancelBuild,
   retryScopeViolation as retryProjectScopeViolation,
   cancelRelationshipResource as cancelProjectRelationshipResource,
   dismissResourceRecommendation,
@@ -189,6 +190,11 @@ function retryBuildStage() {
   retryBuild(session.id)
 }
 
+function cancelBuildStage() {
+  cancelBuild(session.id)
+  activeTab.value = 'gamespec'
+}
+
 function requestChange(source: ChangeSource, request?: string) {
   versionHistoryOpen.value = false
   activeTab.value = 'change'
@@ -329,7 +335,12 @@ onBeforeUnmount(() => {
           @retry-scope="retryScopeViolation"
         />
 
-        <BuildWorkspaceView v-else-if="activeTab === 'build' && isBuildMode" :phase="phase as BuildPhase" @retry="retryBuildStage" />
+        <BuildWorkspaceView
+          v-else-if="activeTab === 'build' && isBuildMode"
+          :phase="phase as BuildPhase"
+          @retry="retryBuildStage"
+          @cancel="cancelBuildStage"
+        />
 
         <section v-else-if="activeTab === 'gamespec' && (phase === 'generating' || phase === 'generation_error')" class="spec-generating">
           <span>GAME SPEC</span>
