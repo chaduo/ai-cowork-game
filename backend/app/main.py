@@ -11,7 +11,9 @@ from app.api.projects import router as projects_router
 from app.api.design import router as design_router
 from app.api.runs import router as runs_router
 from app.api.builds import router as builds_router
+from app.api.candidates import router as candidates_router
 from app.agents.fake_game_agent import FakeGameAgent
+from app.agents.fake_candidate_test_runner import FakeCandidateTestRunner
 from app.services.builds import BuildService
 from sqlalchemy.orm import Session
 from app.db import create_engine_for
@@ -36,6 +38,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.engine = create_engine_for(settings)
     app.state.game_agent = FakeGameAgent()
+    app.state.candidate_test_runner = FakeCandidateTestRunner("pass")
     app.add_exception_handler(ApiError, handle_api_error)
     app.add_exception_handler(RequestValidationError, handle_validation_error)
     app.add_exception_handler(Exception, handle_unexpected_error)
@@ -43,6 +46,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(design_router)
     app.include_router(runs_router)
     app.include_router(builds_router)
+    app.include_router(candidates_router)
 
     @app.middleware("http")
     async def add_request_id(request: Request, call_next):
