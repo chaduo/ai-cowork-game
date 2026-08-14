@@ -223,7 +223,15 @@ class ProjectLifecycleService:
         self.session.flush()
         return recovered
 
-    def start_build(self, project_id: str, revision_id: str | None = None) -> Build:
+    def start_build(
+        self,
+        project_id: str,
+        revision_id: str | None = None,
+        *,
+        build_id: str | None = None,
+        operation: str = "create",
+        request_text: str = "",
+    ) -> Build:
         project = self._project(project_id)
         if project.archived_at:
             raise ValueError("archived project cannot start a build")
@@ -241,7 +249,16 @@ class ProjectLifecycleService:
         if revision is None or revision.project_id != project_id or revision.status != "confirmed":
             raise ValueError("build requires a confirmed gamespec revision")
         self.validate_gamespec_revision(revision.id)
-        build = Build(project_id=project_id, gamespec_revision_id=revision.id, status="running", started_at=utc_now())
+        build = Build(
+            id=build_id or None,
+            project_id=project_id,
+            gamespec_revision_id=revision.id,
+            status="running",
+            operation=operation,
+            request_text=request_text,
+            baseline_playable_version_id=project.current_playable_version_id,
+            started_at=utc_now(),
+        )
         self.session.add(build)
         self.session.flush()
         project.active_build_id = build.id
@@ -256,8 +273,9 @@ class ProjectLifecycleService:
         summary: str,
         artifact_path: str | None = None,
         failure_code: str | None = None,
+        diagnostics_json: str | None = None,
     ) -> BuildCandidate:
-        if status not in {"succeeded", "failed", "cancelled"}:
+        if status not in {"succeeded", "failed", "cancelled", "timed_out", "invalid_output", "unsupported", "orphaned"}:
             raise ValueError("invalid terminal build status")
         build = self.session.get(Build, build_id)
         if build is None:
@@ -272,6 +290,7 @@ class ProjectLifecycleService:
         build.status = status
         build.ended_at = utc_now()
         build.failure_code = failure_code
+        build.failure_message = summary if status != "succeeded" else None
         project = self._project(build.project_id)
         if project.active_build_id == build.id:
             project.active_build_id = None
@@ -281,6 +300,7 @@ class ProjectLifecycleService:
             status=status,
             summary=summary,
             artifact_path=artifact_path,
+            diagnostics_json=diagnostics_json,
         )
         self.session.add(candidate)
         self.session.flush()
@@ -309,6 +329,9 @@ class ProjectLifecycleService:
             parent_build_id=prior.id,
             attempt=attempt,
             status="running",
+            operation=prior.operation,
+            request_text=prior.request_text,
+            baseline_playable_version_id=prior.baseline_playable_version_id,
             started_at=utc_now(),
         )
         self.session.add(retry)

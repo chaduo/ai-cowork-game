@@ -75,6 +75,9 @@ class Build(Base):
     parent_build_id: Mapped[str | None] = mapped_column(ForeignKey("builds.id"), nullable=True)
     attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    operation: Mapped[str] = mapped_column(String(80), nullable=False, default="create")
+    request_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    baseline_playable_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     failure_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     failure_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -127,6 +130,7 @@ class BuildCandidate(Base):
     artifact_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     artifact_checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
+    diagnostics_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
