@@ -6,14 +6,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import Run, RunEventRecord
-from app.contracts.game_agent import ContractError, RunEvent
+from app.contracts.game_agent import ContractError, PendingDecision, RunEvent
 from app.repositories.runs import RunRepository
 
 
 def test_c07_migration_creates_runs_and_run_events_tables(isolated_database) -> None:
     tables = set(inspect(isolated_database).get_table_names())
 
-    assert {"runs", "run_events"}.issubset(tables)
+    assert {"runs", "run_events", "run_pending_decisions"}.issubset(tables)
+    assert "decision_id" in {column["name"] for column in inspect(isolated_database).get_columns("run_events")}
 
 
 def test_run_event_sequence_is_unique_per_run(isolated_database) -> None:
@@ -44,7 +45,7 @@ def test_run_event_sequence_is_unique_per_run(isolated_database) -> None:
             session.commit()
 
 
-def event(run_id: str, sequence: int, *, kind: str = "progress", progress: float | None = 0.5, artifact_ref: str | None = None, error: ContractError | None = None, message: str = "working") -> RunEvent:
+def event(run_id: str, sequence: int, *, kind: str = "progress", progress: float | None = 0.5, artifact_ref: str | None = None, error: ContractError | None = None, message: str = "working", decision_id: str | None = None) -> RunEvent:
     return RunEvent(
         run_id=run_id,
         sequence=sequence,
@@ -55,6 +56,7 @@ def event(run_id: str, sequence: int, *, kind: str = "progress", progress: float
         artifact_ref=artifact_ref,
         error=error,
         timestamp=datetime.now(timezone.utc),
+        decision_id=decision_id,
     )
 
 
@@ -125,3 +127,87 @@ def test_repository_marks_non_terminal_runs_orphaned_without_success(isolated_da
         assert repository.recover_orphaned_runs() == 1
         assert repository.get_run("run-1").status == "orphaned"
         assert repository.get_run("run-2").status == "failed"
+
+
+def test_waiting_for_input_is_persisted_and_survives_restart_recovery(isolated_database) -> None:
+    with Session(isolated_database) as session:
+        repository = RunRepository(session)
+        repository.create_run("run-input", "build-input")
+        decision = PendingDecision(
+            decision_id="decision-1",
+            prompt="选择继续方式",
+            input_type="choice",
+            options=["继续", "调整"],
+        )
+        repository.mark_waiting_for_input(
+            "run-input",
+            event("run-input", 1, kind="build.needs_input", progress=None, message=decision.prompt, decision_id=decision.decision_id),
+            decision,
+        )
+        session.commit()
+
+        assert repository.get_run("run-input").status == "waiting_for_input"
+        assert repository.get_pending_decision("run-input").decision_id == "decision-1"
+        assert repository.recover_orphaned_runs() == 0
+
+
+def test_continuation_resolves_decision_on_same_run_and_is_idempotent(isolated_database) -> None:
+    with Session(isolated_database) as session:
+        repository = RunRepository(session)
+        repository.create_run("run-input", "build-input")
+        decision = PendingDecision(decision_id="decision-1", prompt="选择继续方式", input_type="choice", options=["继续"])
+        repository.mark_waiting_for_input(
+            "run-input",
+            event("run-input", 1, kind="build.needs_input", progress=None, decision_id=decision.decision_id),
+            decision,
+        )
+        resumed = repository.continue_run("run-input", "decision-1", "继续")
+        again = repository.continue_run("run-input", "decision-1", "继续")
+
+        assert resumed.id == again.id == "run-input"
+        assert repository.get_run("run-input").status == "running"
+        assert repository.get_pending_decision("run-input") is None
+        assert [item.sequence for item in repository.list_events("run-input")] == [1, 2]
+        assert repository.list_events("run-input")[1].kind == "build.continued"
+
+
+def test_continuation_rejects_wrong_decision_or_run(isolated_database) -> None:
+    with Session(isolated_database) as session:
+        repository = RunRepository(session)
+        repository.create_run("run-input", "build-input")
+        decision = PendingDecision(decision_id="decision-1", prompt="选择继续方式")
+        repository.mark_waiting_for_input(
+            "run-input",
+            event("run-input", 1, kind="build.needs_input", progress=None, decision_id=decision.decision_id),
+            decision,
+        )
+
+        with pytest.raises(ValueError, match="decision"):
+            repository.continue_run("run-input", "missing-decision", "继续")
+
+
+def test_terminal_cancel_closes_pending_decision_without_promoting_run(isolated_database) -> None:
+    with Session(isolated_database) as session:
+        repository = RunRepository(session)
+        repository.create_run("run-cancel-input", "build-input")
+        decision = PendingDecision(decision_id="decision-cancel", prompt="选择继续方式")
+        repository.mark_waiting_for_input(
+            "run-cancel-input",
+            event("run-cancel-input", 1, kind="build.needs_input", progress=None, decision_id=decision.decision_id),
+            decision,
+        )
+        repository.request_cancel("run-cancel-input")
+        repository.finish_run(
+            "run-cancel-input",
+            "cancelled",
+            event(
+                "run-cancel-input",
+                3,
+                kind="cancelled",
+                progress=None,
+                error=ContractError(code="cancelled", message="stopped"),
+            ),
+        )
+
+        assert repository.get_run("run-cancel-input").status == "cancelled"
+        assert repository.get_pending_decision("run-cancel-input") is None

@@ -87,6 +87,24 @@ def test_success_creates_candidate_without_promoting_current_playable(isolated_d
         assert session.get(Run, job.run_id).status == "succeeded"
 
 
+def test_waiting_build_is_persisted_and_duplicate_execution_does_not_start_provider_again(isolated_database) -> None:
+    with Session(isolated_database) as session:
+        project = confirmed_project(session)
+        agent = FakeGameAgent({"create": "waiting_for_input"})
+        service = BuildService(session, agent)
+        job = service.create_build(project.id)
+
+        first = asyncio.run(service.execute_build(job.build_id))
+        second = asyncio.run(service.execute_build(job.build_id))
+        session.commit()
+
+        assert first.status == second.status == "waiting_for_input"
+        assert first.pending_decision is not None
+        assert second.pending_decision is not None
+        assert len(agent.requests) == 1
+        assert session.get(Run, job.run_id).status == "waiting_for_input"
+
+
 @pytest.mark.parametrize("operation,status", [("modify", "failed"), ("modify", "timed_out"), ("bad", "unsupported")])
 def test_non_success_keeps_diagnostics_and_does_not_promote(isolated_database, operation: str, status: str) -> None:
     with Session(isolated_database) as session:

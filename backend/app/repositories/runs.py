@@ -1,12 +1,13 @@
 import json
 import re
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.contracts.game_agent import ContractError, RunEvent
-from app.models import Run, RunEventRecord, new_id, utc_now
+from app.contracts.game_agent import ContractError, PendingDecision, RunEvent
+from app.models import Run, RunEventRecord, RunPendingDecision, new_id, utc_now
 
 
 RUN_TERMINAL_STATUSES = frozenset({
@@ -18,7 +19,8 @@ RUN_TERMINAL_STATUSES = frozenset({
     "unsupported",
     "orphaned",
 })
-RUN_ACTIVE_STATUSES = frozenset({"running", "cancelling"})
+RUN_EXECUTION_STATUSES = frozenset({"running", "cancelling"})
+RUN_ACTIVE_STATUSES = frozenset({*RUN_EXECUTION_STATUSES, "waiting_for_input"})
 
 _REDACTION_PATTERNS = (
     (re.compile(r"(?i)\bBearer\s+[^\s,;]+"), "Bearer [REDACTED]"),
@@ -83,6 +85,7 @@ class RunRepository:
             progress=normalized.progress,
             artifact_ref=normalized.artifact_ref,
             error_json=self._error_json(normalized.error),
+            decision_id=normalized.decision_id,
             timestamp=normalized.timestamp,
         )
         self.session.add(record)
@@ -94,7 +97,7 @@ class RunRepository:
         if status not in RUN_TERMINAL_STATUSES - {"orphaned"}:
             raise ValueError("invalid terminal run status")
         run = self._require_run(run_id)
-        if run.status not in RUN_ACTIVE_STATUSES:
+        if run.status not in RUN_EXECUTION_STATUSES:
             if run.status == status:
                 return run
             raise ValueError("run is already terminal")
@@ -110,6 +113,15 @@ class RunRepository:
         if terminal_event.error:
             run.failure_code = terminal_event.error.code
             run.failure_message = sanitize_text(terminal_event.error.message)
+        pending = list(self.session.scalars(
+            select(RunPendingDecision).where(
+                RunPendingDecision.run_id == run_id,
+                RunPendingDecision.status == "pending",
+            )
+        ))
+        for decision in pending:
+            decision.status = "closed"
+            decision.resolved_at = run.ended_at
         self.session.flush()
         return run
 
@@ -129,12 +141,26 @@ class RunRepository:
             run.status = "cancelling"
             run.cancel_requested_at = now
             self.session.flush()
+        elif run.status == "waiting_for_input":
+            now = utc_now()
+            self.append_event(RunEvent(
+                run_id=run_id,
+                sequence=run.last_sequence + 1,
+                stage="cancelling",
+                kind="cancel_requested",
+                message="Cancellation requested",
+                progress=None,
+                timestamp=now,
+            ))
+            run.status = "cancelling"
+            run.cancel_requested_at = now
+            self.session.flush()
         elif run.status not in RUN_ACTIVE_STATUSES:
             return run
         return run
 
     def recover_orphaned_runs(self) -> int:
-        runs = list(self.session.scalars(select(Run).where(Run.status.in_(RUN_ACTIVE_STATUSES))))
+        runs = list(self.session.scalars(select(Run).where(Run.status.in_(RUN_EXECUTION_STATUSES))))
         for run in runs:
             now = utc_now()
             self.append_event(RunEvent(
@@ -153,6 +179,91 @@ class RunRepository:
             run.ended_at = now
         self.session.flush()
         return len(runs)
+
+    def mark_waiting_for_input(
+        self,
+        run_id: str,
+        event: RunEvent,
+        decision: PendingDecision,
+    ) -> PendingDecision:
+        run = self._require_run(run_id)
+        if run.status not in RUN_EXECUTION_STATUSES:
+            raise ValueError("run is not active for input")
+        if event.run_id != run_id:
+            raise ValueError("input event belongs to another run")
+        if event.decision_id != decision.decision_id:
+            raise ValueError("input event decision does not match decision")
+
+        existing = self.session.scalar(
+            select(RunPendingDecision).where(
+                RunPendingDecision.run_id == run_id,
+                RunPendingDecision.decision_id == decision.decision_id,
+            )
+        )
+        if existing is not None:
+            if existing.status == "pending":
+                return decision
+            raise ValueError("decision already resolved")
+
+        self.append_event(event)
+        self.session.add(RunPendingDecision(
+            id=new_id(),
+            run_id=run_id,
+            decision_id=decision.decision_id,
+            prompt=decision.prompt,
+            input_type=decision.input_type,
+            options_json=json.dumps(decision.options, ensure_ascii=False),
+            status="pending",
+            created_at=utc_now(),
+        ))
+        run.status = "waiting_for_input"
+        self.session.flush()
+        return decision
+
+    def get_pending_decision(self, run_id: str) -> PendingDecision | None:
+        record = self.session.scalar(
+            select(RunPendingDecision)
+            .where(RunPendingDecision.run_id == run_id, RunPendingDecision.status == "pending")
+            .order_by(RunPendingDecision.created_at.desc())
+        )
+        return self._decision_from_record(record) if record is not None else None
+
+    def continue_run(self, run_id: str, decision_id: str, response: Any) -> Run:
+        run = self._require_run(run_id)
+        record = self.session.scalar(
+            select(RunPendingDecision).where(
+                RunPendingDecision.run_id == run_id,
+                RunPendingDecision.decision_id == decision_id,
+            )
+        )
+        if record is None:
+            raise ValueError("decision not found for run")
+
+        response_json = json.dumps(response, ensure_ascii=False, sort_keys=True)
+        if record.status == "resolved":
+            if record.response_json == response_json:
+                return run
+            raise ValueError("decision already resolved with another response")
+        if run.status != "waiting_for_input":
+            raise ValueError("run is not waiting for input")
+
+        now = utc_now()
+        self.append_event(RunEvent(
+            run_id=run_id,
+            sequence=run.last_sequence + 1,
+            stage="continuation",
+            kind="build.continued",
+            message="Input received",
+            progress=None,
+            timestamp=now,
+            decision_id=decision_id,
+        ))
+        record.status = "resolved"
+        record.response_json = response_json
+        record.resolved_at = now
+        run.status = "running"
+        self.session.flush()
+        return run
 
     def _require_run(self, run_id: str) -> Run:
         run = self.session.get(Run, run_id)
@@ -184,6 +295,15 @@ class RunRepository:
         return json.dumps(error.model_dump(mode="json"), ensure_ascii=False) if error else None
 
     @staticmethod
+    def _decision_from_record(record: RunPendingDecision) -> PendingDecision:
+        return PendingDecision(
+            decision_id=record.decision_id,
+            prompt=record.prompt,
+            input_type=record.input_type,
+            options=json.loads(record.options_json),
+        )
+
+    @staticmethod
     def _to_contract(record: RunEventRecord) -> RunEvent:
         error = ContractError.model_validate(json.loads(record.error_json)) if record.error_json else None
         return RunEvent(
@@ -196,4 +316,5 @@ class RunRepository:
             artifact_ref=record.artifact_ref,
             error=error,
             timestamp=_utc(record.timestamp),
+            decision_id=record.decision_id,
         )

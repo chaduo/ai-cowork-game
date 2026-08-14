@@ -122,6 +122,25 @@ class Run(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
 
 
+class RunPendingDecision(Base):
+    __tablename__ = "run_pending_decisions"
+    __table_args__ = (
+        UniqueConstraint("run_id", "decision_id", name="uq_run_pending_decision"),
+        Index("ix_run_pending_decisions_run_status", "run_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id"), nullable=False)
+    decision_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    input_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    options_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    response_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class RunEventRecord(Base):
     __tablename__ = "run_events"
     __table_args__ = (
@@ -138,6 +157,7 @@ class RunEventRecord(Base):
     progress: Mapped[float | None] = mapped_column(nullable=True)
     artifact_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decision_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 

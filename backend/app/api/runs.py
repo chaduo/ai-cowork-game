@@ -2,13 +2,14 @@ import asyncio
 import json
 import time
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, Header, Query, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.contracts.game_agent import ContractError, RunEvent
+from app.contracts.game_agent import ContractError, PendingDecision, RunEvent
 from app.errors import ApiError
 from app.models import Run
 from app.repositories.runs import RUN_TERMINAL_STATUSES, RunRepository
@@ -31,6 +32,12 @@ class RunResponse(BaseModel):
     ended_at: datetime | None
     cancel_requested_at: datetime | None
     error: ContractError | None = None
+    pending_decision: PendingDecision | None = None
+
+
+class RunInputRequest(BaseModel):
+    decision_id: str = Field(min_length=1, max_length=120)
+    response: Any
 
 
 def _session(request: Request) -> Session:
@@ -43,7 +50,7 @@ def _error(run: Run) -> ContractError | None:
     return ContractError(code=run.failure_code, message=run.failure_message or run.failure_code)
 
 
-def _response(run: Run) -> RunResponse:
+def _response(repository: RunRepository, run: Run) -> RunResponse:
     return RunResponse(
         run_id=run.id,
         build_id=run.build_id,
@@ -53,6 +60,7 @@ def _response(run: Run) -> RunResponse:
         ended_at=run.ended_at,
         cancel_requested_at=run.cancel_requested_at,
         error=_error(run),
+        pending_decision=repository.get_pending_decision(run.id),
     )
 
 
@@ -74,14 +82,15 @@ def create_run(payload: CreateRunRequest, request: Request) -> JSONResponse:
         session.commit()
         return JSONResponse(
             status_code=status.HTTP_200_OK if existing is not None else status.HTTP_201_CREATED,
-            content=_response(run).model_dump(mode="json"),
+            content=_response(repository, run).model_dump(mode="json"),
         )
 
 
 @router.get("/{run_id}", response_model=RunResponse)
 def get_run(run_id: str, request: Request) -> RunResponse:
     with _session(request) as session:
-        return _response(_require(RunRepository(session), run_id))
+        repository = RunRepository(session)
+        return _response(repository, _require(repository, run_id))
 
 
 @router.get("/{run_id}/events", response_model=list[RunEvent])
@@ -153,4 +162,17 @@ def cancel_run(run_id: str, request: Request) -> RunResponse:
         except ValueError as cause:
             raise ApiError("run_cancel_failed", str(cause), [], 409) from cause
         session.commit()
-        return _response(run)
+        return _response(repository, run)
+
+
+@router.post("/{run_id}/input", response_model=RunResponse)
+def continue_run(run_id: str, payload: RunInputRequest, request: Request) -> RunResponse:
+    with _session(request) as session:
+        repository = RunRepository(session)
+        _require(repository, run_id)
+        try:
+            run = repository.continue_run(run_id, payload.decision_id, payload.response)
+        except ValueError as cause:
+            raise ApiError("run_input_failed", str(cause), [], 409) from cause
+        session.commit()
+        return _response(repository, run)
