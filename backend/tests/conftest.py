@@ -19,3 +19,11 @@ def isolated_database(tmp_path: Path) -> Engine:
     engine = create_engine_for(Settings(database_url=database_url))
     yield engine
     engine.dispose()
+
+
+@pytest.fixture
+def workspace(tmp_path: Path) -> Path:
+    """An empty working directory for process-executor tests (C09)."""
+    path = tmp_path / "workspace"
+    path.mkdir()
+    return path
