@@ -53,13 +53,22 @@ def test_complete_evidence_marks_candidate_ready(isolated_database) -> None:
         report = asyncio.run(CandidateTestService(session, FakeCandidateTestRunner("pass")).test_candidate(candidate.id))
         session.commit()
 
-        assert report.status == "pass"
-        assert report.platform_verdict == "pass"
+        assert report.status == "PASSED"
+        assert report.platform_verdict == "PASSED"
+        assert report.severity == "none"
         assert session.get(BuildCandidate, candidate.id).test_gate_status == "ready"
-        assert {item.kind for item in report.evidence} == {"browser_started", "console", "core_input", "gameplay", "completion"}
+        assert {item.kind for item in report.evidence} == {
+            "build_check",
+            "browser_started",
+            "console",
+            "core_input",
+            "gameplay",
+            "completion",
+            "phaser_hook",
+        }
 
 
-@pytest.mark.parametrize("fixture,expected", [("runtime_only_pass", "invalid"), ("missing_evidence", "invalid"), ("contradictory", "invalid"), ("console_failure", "fail"), ("completion_failure", "fail")])
+@pytest.mark.parametrize("fixture,expected", [("runtime_only_pass", "INVALID"), ("missing_evidence", "INVALID"), ("contradictory", "INVALID"), ("console_failure", "CRITICAL_FAILURE"), ("completion_failure", "CRITICAL_FAILURE")])
 def test_incomplete_or_conflicting_evidence_cannot_be_ready(isolated_database, fixture: str, expected: str) -> None:
     with Session(isolated_database) as session:
         project = confirmed_project(session)
@@ -81,7 +90,7 @@ def test_build_failure_and_missing_artifact_cannot_be_ready(isolated_database) -
         missing_report = asyncio.run(CandidateTestService(session, FakeCandidateTestRunner("pass")).test_candidate(missing_artifact.id))
         session.commit()
 
-        assert failed_report.status == missing_report.status == "invalid"
+        assert failed_report.status == missing_report.status == "INVALID"
         assert session.get(BuildCandidate, failed.id).test_gate_status == "invalid"
         assert session.get(BuildCandidate, missing_artifact.id).test_gate_status == "invalid"
 
@@ -100,7 +109,7 @@ def test_retesting_candidate_returns_immutable_report_and_does_not_touch_current
 
         assert first.id == second.id
         assert report_count == 1
-        assert evidence_count == 5
+        assert evidence_count == 7
         assert session.get(Project, project.id).current_playable_version_id == "playable-before-test"
 
 
@@ -120,6 +129,28 @@ def test_repair_links_new_candidate_without_overwriting_failed_parent(isolated_d
         assert session.get(BuildCandidate, parent.id).test_gate_status == "failed"
 
 
+def test_partial_failure_is_distinct_from_critical_failure(isolated_database) -> None:
+    with Session(isolated_database) as session:
+        project = confirmed_project(session)
+        candidate = successful_candidate(session, project)
+        report = asyncio.run(CandidateTestService(session, FakeCandidateTestRunner("partial_failure")).test_candidate(candidate.id))
+
+        assert report.status == "PARTIAL_FAILURE"
+        assert report.severity == "partial"
+        assert session.get(BuildCandidate, candidate.id).test_gate_status == "failed"
+
+
+@pytest.mark.parametrize("fixture", ["invalid_artifact", "hook_failure"])
+def test_invalid_artifact_or_unverified_hook_cannot_be_ready(isolated_database, fixture: str) -> None:
+    with Session(isolated_database) as session:
+        project = confirmed_project(session)
+        candidate = successful_candidate(session, project)
+        report = asyncio.run(CandidateTestService(session, FakeCandidateTestRunner(fixture)).test_candidate(candidate.id))
+
+        assert report.status in {"INVALID", "CRITICAL_FAILURE"}
+        assert session.get(BuildCandidate, candidate.id).test_gate_status != "ready"
+
+
 def test_repair_rejects_successful_parent_cross_project_and_tested_replacement(isolated_database) -> None:
     with Session(isolated_database) as session:
         first_project = confirmed_project(session)
@@ -136,3 +167,21 @@ def test_repair_rejects_successful_parent_cross_project_and_tested_replacement(i
         asyncio.run(CandidateTestService(session, FakeCandidateTestRunner("console_failure")).test_candidate(failed_parent.id))
         with pytest.raises(ValueError, match="already linked or tested"):
             service.link_repair_candidate(failed_parent.id, tested_replacement.id)
+
+
+def test_repair_link_rejects_after_three_repair_rounds(isolated_database) -> None:
+    with Session(isolated_database) as session:
+        project = confirmed_project(session)
+        parent = create_candidate(session, project)
+        service = CandidateTestService(session, FakeCandidateTestRunner("console_failure"))
+        asyncio.run(service.test_candidate(parent.id))
+
+        for expected_round in range(1, 4):
+            replacement = create_candidate(session, project)
+            parent = service.link_repair_candidate(parent.id, replacement.id)
+            assert parent.repair_round == expected_round
+            asyncio.run(service.test_candidate(parent.id))
+
+        too_many = create_candidate(session, project)
+        with pytest.raises(ValueError, match="maximum repair rounds"):
+            service.link_repair_candidate(parent.id, too_many.id)

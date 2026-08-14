@@ -8,7 +8,7 @@ def test_c12_migration_creates_test_gate_tables_and_candidate_columns(isolated_d
     inspector = inspect(isolated_database)
     assert {"test_reports", "test_evidence"}.issubset(set(inspector.get_table_names()))
     candidate_columns = {column["name"] for column in inspector.get_columns("build_candidates")}
-    assert {"test_gate_status", "parent_candidate_id", "attempt"}.issubset(candidate_columns)
+    assert {"test_gate_status", "parent_candidate_id", "attempt", "repair_round"}.issubset(candidate_columns)
 
 
 def test_c12_records_reload_with_repair_ancestry_and_evidence(isolated_database) -> None:
@@ -41,8 +41,9 @@ def test_c12_records_reload_with_repair_ancestry_and_evidence(isolated_database)
         report = ReportRecord(
             candidate_id=replacement.id,
             runtime_verdict="pass",
-            platform_verdict="pass",
-            status="pass",
+            platform_verdict="PASSED",
+            status="PASSED",
+            severity="none",
             summary="all checks passed",
         )
         session.add(report)
@@ -51,6 +52,8 @@ def test_c12_records_reload_with_repair_ancestry_and_evidence(isolated_database)
             test_report_id=report.id,
             kind="browser_started",
             status="passed",
+            source="platform",
+            severity="critical",
             expected="browser starts",
             observed="browser started",
             artifact_ref="dist/index.html",
@@ -61,5 +64,7 @@ def test_c12_records_reload_with_repair_ancestry_and_evidence(isolated_database)
         loaded_report = session.scalar(select(ReportRecord).where(ReportRecord.candidate_id == replacement.id))
         assert loaded.parent_candidate_id == parent.id
         assert loaded.attempt == 2
-        assert loaded_report.status == "pass"
+        assert loaded_report.status == "PASSED"
+        assert loaded_report.severity == "none"
         assert loaded_report.evidence[0].kind == "browser_started"
+        assert loaded_report.evidence[0].source == "platform"

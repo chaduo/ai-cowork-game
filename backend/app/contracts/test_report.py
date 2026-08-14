@@ -10,13 +10,17 @@ class TestReportModel(BaseModel):
 
 
 EvidenceStatus = Literal["passed", "failed", "missing"]
+EvidenceSource = Literal["platform", "runtime"]
+EvidenceSeverity = Literal["partial", "critical"]
 RuntimeVerdict = Literal["pass", "fail", "unknown"]
-PlatformVerdict = Literal["pass", "fail", "invalid"]
+PlatformVerdict = Literal["PASSED", "PARTIAL_FAILURE", "CRITICAL_FAILURE", "INVALID"]
 
 
 class CandidateTestEvidence(TestReportModel):
     kind: str = Field(min_length=1, max_length=80)
     status: EvidenceStatus
+    source: EvidenceSource = "runtime"
+    severity: EvidenceSeverity = "critical"
     expected: str = Field(min_length=1, max_length=4000)
     observed: str = Field(min_length=1, max_length=4000)
     artifact_ref: str = Field(min_length=1, max_length=4096)

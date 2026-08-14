@@ -31,8 +31,11 @@ def test_candidate_test_api_persists_report_and_retrieval_is_idempotent(isolated
     assert tested.status_code == repeated.status_code == 200
     assert tested.json()["candidate_id"] == candidate_id
     assert tested.json()["test_gate_status"] == "ready"
-    assert tested.json()["report"]["platform_verdict"] == "pass"
-    assert len(tested.json()["report"]["evidence"]) == 5
+    assert tested.json()["repair_round"] == 0
+    assert tested.json()["report"]["platform_verdict"] == "PASSED"
+    assert tested.json()["report"]["severity"] == "none"
+    assert len(tested.json()["report"]["evidence"]) == 7
+    assert all(item["source"] == "platform" for item in tested.json()["report"]["evidence"])
     assert repeated.json()["report"]["id"] == tested.json()["report"]["id"]
     assert fetched.json()["report"]["id"] == tested.json()["report"]["id"]
 
@@ -44,7 +47,8 @@ def test_candidate_test_api_exposes_invalid_gate_without_promoting(isolated_data
 
     assert response.status_code == 200
     assert response.json()["test_gate_status"] == "invalid"
-    assert response.json()["report"]["platform_verdict"] == "invalid"
+    assert response.json()["report"]["platform_verdict"] == "INVALID"
+    assert response.json()["report"]["severity"] == "critical"
 
 
 def test_candidate_repair_link_api_preserves_parent_and_attempt(isolated_database) -> None:
@@ -66,6 +70,7 @@ def test_candidate_repair_link_api_preserves_parent_and_attempt(isolated_databas
     assert response.status_code == 200
     assert response.json()["parent_candidate_id"] == parent_id
     assert response.json()["attempt"] == 2
+    assert response.json()["repair_round"] == 1
 
 
 def test_unknown_candidate_returns_error_envelope(isolated_database) -> None:

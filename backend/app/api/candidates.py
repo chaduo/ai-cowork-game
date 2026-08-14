@@ -23,6 +23,8 @@ class EvidenceResponse(BaseModel):
     id: str
     kind: str
     status: str
+    source: str
+    severity: str
     expected: str
     observed: str
     artifact_ref: str
@@ -35,6 +37,7 @@ class TestReportResponse(BaseModel):
     runtime_verdict: str
     platform_verdict: str
     status: str
+    severity: str
     summary: str
     diagnostics: list[dict] = Field(default_factory=list)
     created_at: datetime
@@ -49,6 +52,7 @@ class CandidateResponse(BaseModel):
     test_gate_status: str
     parent_candidate_id: str | None
     attempt: int
+    repair_round: int
     report: TestReportResponse | None = None
 
 
@@ -71,6 +75,7 @@ def _report_response(report: TestReport) -> TestReportResponse:
         runtime_verdict=report.runtime_verdict,
         platform_verdict=report.platform_verdict,
         status=report.status,
+        severity=report.severity,
         summary=report.summary,
         diagnostics=diagnostics,
         created_at=report.created_at,
@@ -78,6 +83,8 @@ def _report_response(report: TestReport) -> TestReportResponse:
             id=item.id,
             kind=item.kind,
             status=item.status,
+            source=item.source,
+            severity=item.severity,
             expected=item.expected,
             observed=item.observed,
             artifact_ref=item.artifact_ref,
@@ -95,6 +102,7 @@ def _candidate_response(candidate: BuildCandidate, report: TestReport | None = N
         test_gate_status=candidate.test_gate_status,
         parent_candidate_id=candidate.parent_candidate_id,
         attempt=candidate.attempt,
+        repair_round=candidate.repair_round,
         report=_report_response(report) if report else None,
     )
 
