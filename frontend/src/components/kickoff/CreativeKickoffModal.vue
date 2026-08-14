@@ -10,6 +10,7 @@ import RetryState from './RetryState.vue'
 import ThinkingIndicator from './ThinkingIndicator.vue'
 import { buildScenarioSummary, getFollowUpQuestion, iterationDirections, iterationQuestions, resolveKickoffScenario } from './kickoffFixtures'
 import type { Choice, ConfirmedGameDesign, Decision, KickoffPhase, Question } from './kickoffTypes'
+import type { CreatorGameDesignDraft } from '../../contracts/creatorGameDesign'
 
 const props = withDefaults(
   defineProps<{
@@ -17,11 +18,16 @@ const props = withDefaults(
     originalIdea: string
     templateId?: string | null
     forceMockError?: boolean
+    initialDraft?: CreatorGameDesignDraft | null
   }>(),
-  { forceMockError: false },
+  { forceMockError: false, initialDraft: null },
 )
 
-const emit = defineEmits<{ close: []; confirmed: [design: ConfirmedGameDesign] }>()
+const emit = defineEmits<{
+  close: []
+  confirmed: [design: ConfirmedGameDesign]
+  draftUpdated: [draft: CreatorGameDesignDraft]
+}>()
 
 const phase = ref<KickoffPhase>('clarifying')
 const questionIndex = ref(0)
@@ -47,6 +53,59 @@ const statusLabel = computed(() => {
   if (phase.value === 'confirmed' || phase.value === 'confirming') return 'DESIGN CONFIRMATION'
   return '正在完善游戏设计'
 })
+
+function restoreDraft(draft: CreatorGameDesignDraft | null) {
+  if (!draft) return
+  decisions.value = draft.decisions.map((decision) => ({
+    questionId: decision.question_id,
+    question: decision.question,
+    response: decision.response,
+    answerId: decision.answer_id,
+    answer: decision.answer,
+  }))
+  questionIndex.value = draft.clarification.question_index
+  iterationNote.value = draft.clarification.custom_input || null
+  phase.value = draft.clarification.status === 'ready'
+    ? 'ready'
+    : draft.clarification.status === 'iterating'
+      ? 'iterating'
+      : draft.clarification.status === 'confirmed'
+        ? 'confirmed'
+        : 'clarifying'
+}
+
+function currentDraft(): CreatorGameDesignDraft {
+  const status = phase.value === 'ready' || phase.value === 'confirmed'
+    ? 'ready'
+    : phase.value === 'iterating' || phase.value === 'iterating-question'
+      ? 'iterating'
+      : 'clarifying'
+  return {
+    schema_version: 1,
+    original_idea: props.originalIdea,
+    project_title: scenario.value.title,
+    scenario_id: scenario.value.id,
+    summary: {
+      title: readySummary.value.title,
+      summary: readySummary.value.summary,
+      highlights: [...readySummary.value.highlights],
+      core_loop: [...readySummary.value.coreLoop],
+      progression: [...(readySummary.value.progression ?? [])],
+    },
+    decisions: decisions.value.map((decision) => ({
+      question_id: decision.questionId,
+      question: decision.question,
+      response: decision.response,
+      answer_id: decision.answerId,
+      answer: decision.answer,
+    })),
+    clarification: {
+      question_index: questionIndex.value,
+      status,
+      custom_input: iterationNote.value ?? '',
+    },
+  }
+}
 
 function clearTimer() {
   if (activeTimer !== null) window.clearTimeout(activeTimer)
@@ -160,6 +219,7 @@ watch(
   (open) => {
     document.body.style.overflow = open ? 'hidden' : ''
     if (open) {
+      restoreDraft(props.initialDraft)
       window.addEventListener('keydown', handleKeydown)
       nextTick(() => {
         closeButtonRef.value?.focus()
@@ -171,6 +231,14 @@ watch(
     }
   },
   { immediate: true },
+)
+
+watch(
+  [phase, questionIndex, decisions, iterationNote],
+  () => {
+    if (props.open && phase.value !== 'confirmed') emit('draftUpdated', currentDraft())
+  },
+  { deep: true },
 )
 
 onBeforeUnmount(() => {

@@ -6,7 +6,7 @@ import MyResources from './screens/MyResources.vue'
 import ResourceReviewWorkspace from './screens/ResourceReviewWorkspace.vue'
 import type { ConfirmedGameDesign } from './components/kickoff/kickoffTypes'
 import type { ReleaseRecord } from './components/workspace/releaseTypes'
-import { appendPlayableVersion, completeGeneration, configureDemoRuntime, createProject, getActiveProject, getPendingResourceCount, openProject, projectStore, startGeneration, updateSavedResourceMetadata } from './stores/projectStore'
+import { appendPlayableVersion, completeGeneration, configureDemoRuntime, createProject, getActiveProject, getPendingResourceCount, openProject, projectStore, setProjectDesignStatus, startGeneration, updateSavedResourceMetadata } from './stores/projectStore'
 import { seedDemo, type AppSurface } from './stores/demoSeeds'
 import { getProjectRecord, listProjectRecords, type ProjectResponse } from './api/client'
 
@@ -126,6 +126,7 @@ async function enterWorkspace(design: ConfirmedGameDesign, projectId: string) {
     projectListError.value = '项目已经创建，但暂时无法读取项目状态。'
   }
   const session = createProject(design, projectId)
+  setProjectDesignStatus(session.id, 'confirmed')
   startGeneration(session.id)
   surface.value = 'workspace'
 }

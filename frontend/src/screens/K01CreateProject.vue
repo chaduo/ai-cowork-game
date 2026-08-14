@@ -13,8 +13,9 @@ import CreativeKickoffModal from '../components/kickoff/CreativeKickoffModal.vue
 import type { ConfirmedGameDesign } from '../components/kickoff/kickoffTypes'
 import type { ProjectSession } from '../stores/projectStore'
 import { runtimeConfig } from '../stores/projectStore'
-import { ApiClientError, createProjectRecord } from '../api/client'
+import { ApiClientError, confirmProjectDesign, createProjectRecord, getProjectDesign, saveProjectDesign } from '../api/client'
 import type { ProjectResponse } from '../api/client'
+import type { CreatorGameDesignDraft } from '../contracts/creatorGameDesign'
 
 const props = defineProps<{
   projects: ProjectSession[]
@@ -80,6 +81,7 @@ const templateFlash = ref(false)
 const kickoffStarted = ref(false)
 const kickoffOpen = ref(false)
 const kickoffIdea = ref('')
+const kickoffDraft = ref<CreatorGameDesignDraft | null>(null)
 const backendProjectId = ref<string | null>(null)
 const idempotencyKey = ref<string | null>(null)
 const creatorRef = ref<HTMLElement | null>(null)
@@ -191,6 +193,7 @@ async function createProject() {
     try {
       const created = await createProjectRecord({ name: nextIdea.slice(0, 80), originalIdea: nextIdea }, idempotencyKey.value)
       backendProjectId.value = created.id
+      kickoffDraft.value = (await getProjectDesign(created.id)).draft
     } catch (cause) {
       error.value = cause instanceof ApiClientError ? cause.message : '暂时无法保存这个想法，请确认后端已启动。'
       return
@@ -198,6 +201,16 @@ async function createProject() {
     kickoffStarted.value = true
   }
   kickoffOpen.value = true
+}
+
+async function saveKickoffDraft(draft: CreatorGameDesignDraft) {
+  kickoffDraft.value = draft
+  if (!backendProjectId.value) return
+  try {
+    await saveProjectDesign(backendProjectId.value, draft)
+  } catch (cause) {
+    error.value = cause instanceof ApiClientError ? cause.message : '暂时无法保存这次澄清，请稍后重试。'
+  }
 }
 
 async function closeKickoff() {
@@ -208,7 +221,15 @@ async function closeKickoff() {
 
 function enterWorkspace(design: ConfirmedGameDesign) {
   if (!backendProjectId.value) return
-  window.setTimeout(() => emit('enterWorkspace', design, backendProjectId.value!), 900)
+  window.setTimeout(async () => {
+    try {
+      await confirmProjectDesign(backendProjectId.value!)
+      emit('enterWorkspace', design, backendProjectId.value!)
+    } catch (cause) {
+      error.value = cause instanceof ApiClientError ? cause.message : '设计确认失败，请稍后重试。'
+      kickoffOpen.value = false
+    }
+  }, 900)
 }
 
 function onIdeaKeydown(event: KeyboardEvent) {
@@ -350,7 +371,9 @@ function onIdeaKeydown(event: KeyboardEvent) {
       :original-idea="kickoffIdea"
       :template-id="selectedTemplateId"
       :force-mock-error="forceMockError"
+      :initial-draft="kickoffDraft"
       @close="closeKickoff"
+      @draft-updated="saveKickoffDraft"
       @confirmed="enterWorkspace"
     />
   </div>
