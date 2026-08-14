@@ -4,14 +4,16 @@ from sqlalchemy.orm import Session
 
 from app.models import Build, BuildCandidate, Project
 from app.services.lifecycle import ProjectLifecycleService
+from tests.test_c05_design_api import draft_payload
+from tests.test_c05_gamespec_contract import valid_gamespec
 
 
 def confirmed_service(session: Session) -> tuple[ProjectLifecycleService, Project]:
     service = ProjectLifecycleService(session)
     project = service.create_project("Garden", "A quiet garden game")
-    service.submit_design(project.id, {"loop": "plant"})
+    service.submit_design(project.id, draft_payload())
     service.confirm_design(project.id)
-    revision = service.create_gamespec_revision(project.id, {"genre": "sim"})
+    revision = service.create_gamespec_revision(project.id, valid_gamespec())
     service.confirm_gamespec_revision(project.id, revision.id)
     return service, project
 
@@ -51,9 +53,9 @@ def test_projects_have_independent_active_build_guards(isolated_database) -> Non
     with Session(isolated_database) as session:
         service, first_project = confirmed_service(session)
         second_project = service.create_project("River", "A river game")
-        service.submit_design(second_project.id, {"loop": "row"})
+        service.submit_design(second_project.id, draft_payload())
         service.confirm_design(second_project.id)
-        revision = service.create_gamespec_revision(second_project.id, {"genre": "sim"})
+        revision = service.create_gamespec_revision(second_project.id, valid_gamespec())
         service.confirm_gamespec_revision(second_project.id, revision.id)
 
         first_build = service.start_build(first_project.id)

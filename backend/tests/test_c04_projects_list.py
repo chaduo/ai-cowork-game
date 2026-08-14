@@ -4,6 +4,8 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.main import create_app
 from app.services.lifecycle import ProjectLifecycleService
+from tests.test_c05_design_api import draft_payload
+from tests.test_c05_gamespec_contract import valid_gamespec
 
 
 def client_for(database_url: str) -> TestClient:
@@ -34,7 +36,9 @@ def test_projects_list_returns_derived_lifecycle_summary_for_each_project(isolat
 
     with Session(isolated_database) as session:
         service = ProjectLifecycleService(session)
-        revision = service.create_gamespec_revision(first["id"], {"genre": "sim"})
+        service.submit_design(first["id"], draft_payload())
+        service.confirm_design(first["id"])
+        revision = service.create_gamespec_revision(first["id"], valid_gamespec())
         service.confirm_gamespec_revision(first["id"], revision.id)
         build = service.start_build(first["id"])
         candidate = service.finish_build(build.id, "succeeded", summary="ready", artifact_path="artifacts/v1")

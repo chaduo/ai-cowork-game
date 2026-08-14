@@ -1,9 +1,11 @@
 from enum import StrEnum
 import json
 
+from pydantic import ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from app.contracts.gamespec import CreatorGameSpec, RuntimeBuildSpec
 from app.models import Build, BuildCandidate, GameDesign, GameSpecRevision, PlayableVersion, Project, Release, utc_now
 
 
@@ -87,6 +89,29 @@ class ProjectLifecycleService:
         revision.confirmed_at = utc_now()
         self.session.flush()
         return revision
+
+    def validate_gamespec_revision(self, revision_id: str) -> CreatorGameSpec:
+        revision = self.session.get(GameSpecRevision, revision_id)
+        if revision is None:
+            raise ValueError("GameSpec revision not found")
+        try:
+            return CreatorGameSpec.model_validate_json(revision.content_json)
+        except ValidationError as error:
+            raise ValueError(f"GameSpec schema is invalid: {error}") from error
+
+    def runtime_build_spec(self, project_id: str) -> RuntimeBuildSpec:
+        project = self._project(project_id)
+        design = self.session.scalar(select(GameDesign).where(GameDesign.project_id == project.id))
+        if design is None or design.status != "confirmed":
+            raise ValueError("build requires confirmed Game Design")
+        revision = self.session.scalar(
+            select(GameSpecRevision)
+            .where(GameSpecRevision.project_id == project.id, GameSpecRevision.status == "confirmed")
+            .order_by(GameSpecRevision.revision_number.desc())
+        )
+        if revision is None:
+            raise ValueError("build requires a confirmed GameSpec")
+        return self.validate_gamespec_revision(revision.id).to_runtime_build_spec()
 
     def derive_project_stage(self, project_id: str) -> ProjectStage:
         project = self._project(project_id)
@@ -204,6 +229,9 @@ class ProjectLifecycleService:
             raise ValueError("archived project cannot start a build")
         if project.active_build_id:
             raise ValueError("active build already exists")
+        design = self.session.scalar(select(GameDesign).where(GameDesign.project_id == project.id))
+        if design is None or design.status != "confirmed":
+            raise ValueError("build requires confirmed Game Design")
         revision = self.session.get(GameSpecRevision, revision_id) if revision_id else self.session.scalar(
             select(GameSpecRevision).where(
                 GameSpecRevision.project_id == project_id,
@@ -212,6 +240,7 @@ class ProjectLifecycleService:
         )
         if revision is None or revision.project_id != project_id or revision.status != "confirmed":
             raise ValueError("build requires a confirmed gamespec revision")
+        self.validate_gamespec_revision(revision.id)
         build = Build(project_id=project_id, gamespec_revision_id=revision.id, status="running", started_at=utc_now())
         self.session.add(build)
         self.session.flush()
