@@ -12,7 +12,10 @@ def test_project_design_and_gamespec_confirmation_derive_stages(isolated_databas
         project = service.create_project("Garden", "A quiet garden game")
         assert service.derive_project_stage(project.id).value == "design_draft"
 
-        service.submit_design(project.id, {"loop": "plant"})
+        service.submit_design(project.id, {
+            "loop": "plant",
+            "readiness": {"status": "ready", "blockers": [], "unresolved_decisions": []},
+        })
         assert service.derive_project_stage(project.id).value == "design_review"
         service.confirm_design(project.id)
 
@@ -27,7 +30,10 @@ def test_confirmed_gamespec_revision_is_immutable_and_superseded_by_next_confirm
     with Session(isolated_database) as session:
         service = ProjectLifecycleService(session)
         project = service.create_project("Garden", "A quiet garden game")
-        service.submit_design(project.id, {"loop": "plant"})
+        service.submit_design(project.id, {
+            "loop": "plant",
+            "readiness": {"status": "ready", "blockers": [], "unresolved_decisions": []},
+        })
         service.confirm_design(project.id)
         first = service.create_gamespec_revision(project.id, {"genre": "sim"})
         service.confirm_gamespec_revision(project.id, first.id)

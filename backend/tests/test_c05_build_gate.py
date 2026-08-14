@@ -19,7 +19,9 @@ def test_build_requires_confirmed_game_design(isolated_database) -> None:
         service = ProjectLifecycleService(session)
         project = service.create_project("Garden", "A quiet garden game")
         revision = service.create_gamespec_revision(project.id, valid_gamespec())
-        service.confirm_gamespec_revision(project.id, revision.id)
+
+        with pytest.raises(ValueError, match="confirmed Game Design"):
+            service.confirm_gamespec_revision(project.id, revision.id)
 
         with pytest.raises(ValueError, match="confirmed Game Design"):
             service.start_build(project.id)

@@ -35,6 +35,12 @@ def draft_payload() -> dict:
             "status": "clarifying",
             "custom_input": "",
         },
+        "readiness": {
+            "status": "ready",
+            "blockers": [],
+            "unresolved_decisions": [],
+            "checked_at": None,
+        },
     }
 
 
