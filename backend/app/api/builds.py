@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.agents.fake_game_agent import FakeGameAgent
 from app.errors import ApiError
 from app.models import Build, BuildCandidate, Project, Run
-from app.services.builds import BuildJob, BuildService
+from app.services.builds import BuildService
 
 
 router = APIRouter(prefix="/api/v1", tags=["builds"])
