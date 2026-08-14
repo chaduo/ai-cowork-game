@@ -345,7 +345,8 @@ onMounted(async () => {
           spec: response.spec,
         })
         if (response.status === 'confirmed') {
-          setWorkspacePhase(session.id, getCurrentPlayable(session) ? 'playable_ready' : 'spec_confirmed')
+          if (getCurrentPlayable(session)) setWorkspacePhase(session.id, 'playable_ready')
+          else confirmSpecAndStartBuild(session.id)
         }
       } catch (cause) {
         if (!(cause instanceof ApiClientError && cause.code === 'gamespec_not_found')) {
