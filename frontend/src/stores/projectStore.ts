@@ -59,11 +59,39 @@ export const projectStore = reactive<ProjectStore>({
 })
 
 let projectCounter = 0
+const PROJECT_STORE_STORAGE_KEY = 'ai-cowork-game.project-store.v1'
+
+type PersistedProjectStore = {
+  version: 1
+  projects: ProjectSession[]
+}
+
+function canUseProjectStorage(): boolean {
+  return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined'
+}
+
+function persistProjectStore(): void {
+  if (!canUseProjectStorage()) return
+  try {
+    const payload: PersistedProjectStore = { version: 1, projects: projectStore.projects }
+    window.localStorage.setItem(PROJECT_STORE_STORAGE_KEY, JSON.stringify(payload))
+  } catch {
+    // Storage is an enhancement for the prototype; unavailable storage must
+    // not prevent the in-memory workflow from continuing.
+  }
+}
 
 export function resetProjectStore(): void {
   projectStore.projects.splice(0)
   projectStore.activeProjectId = null
   projectStore.savedResources.splice(0)
+  if (canUseProjectStorage()) {
+    try {
+      window.localStorage.removeItem(PROJECT_STORE_STORAGE_KEY)
+    } catch {
+      // Ignore storage cleanup failures in demo mode.
+    }
+  }
 }
 
 export function getProject(id: string): ProjectSession | undefined {
@@ -299,6 +327,7 @@ export function createReleaseDraftForProject(projectId: string): ReleaseDraft | 
 
 export function touchProject(session: ProjectSession): void {
   session.updatedAt = Date.now()
+  persistProjectStore()
 }
 
 export function createProjectSession(design: ConfirmedGameDesign, projectId?: string): ProjectSession {
@@ -344,10 +373,32 @@ export function createProjectSession(design: ConfirmedGameDesign, projectId?: st
   }
 }
 
+function restoreProjectStore(): void {
+  if (!canUseProjectStorage()) return
+  try {
+    const raw = window.localStorage.getItem(PROJECT_STORE_STORAGE_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw) as Partial<PersistedProjectStore>
+    if (parsed.version !== 1 || !Array.isArray(parsed.projects)) return
+
+    for (const snapshot of parsed.projects) {
+      if (!snapshot || typeof snapshot !== 'object' || typeof snapshot.id !== 'string' || !snapshot.design) continue
+      const session = createProjectSession(snapshot.design, snapshot.id)
+      Object.assign(session, snapshot)
+      projectStore.projects.push(session)
+    }
+  } catch {
+    // Ignore malformed snapshots and fall back to API state.
+  }
+}
+
+restoreProjectStore()
+
 export function createProject(design: ConfirmedGameDesign, projectId?: string): ProjectSession {
   const session = createProjectSession(design, projectId)
   projectStore.projects.push(session)
   projectStore.activeProjectId = session.id
+  persistProjectStore()
   return session
 }
 

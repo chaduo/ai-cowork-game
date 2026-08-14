@@ -121,8 +121,10 @@ const projects = computed<ProjectListItem[]>(() => {
     return {
       id: project.id,
       name: remote?.name ?? project.design.projectTitle,
-      updatedAt: remote ? Date.parse(remote.updated_at) : project.updatedAt,
-      stage: remote?.stage ?? projectStage(project),
+      updatedAt: remote ? Math.max(Date.parse(remote.updated_at), project.updatedAt) : project.updatedAt,
+      stage: project.playableVersions.length > 0 || project.releases.length > 0
+        ? projectStage(project)
+        : remote?.stage ?? projectStage(project),
     }
   })
   const localIds = new Set(local.map((project) => project.id))
@@ -154,10 +156,10 @@ watch(
 )
 
 function projectStage(project: ProjectSession): string {
-  if (project.releases.length > 0) return 'Released'
-  if (project.playableVersions.length > 0) return 'Playable'
-  if (project.phase.includes('build') || project.phase.includes('change')) return 'Building'
-  return 'GameSpec'
+  if (project.releases.length > 0) return 'published'
+  if (project.playableVersions.length > 0) return 'playable'
+  if (project.phase.includes('build') || project.phase.includes('change')) return 'building'
+  return 'gamespec_review'
 }
 
 function displayStage(stage: string): string {

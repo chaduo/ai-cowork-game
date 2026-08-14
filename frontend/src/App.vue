@@ -63,7 +63,9 @@ function hydrateProjectSession(record: ProjectResponse) {
   const existing = projectStore.projects.find((project) => project.id === record.id)
   const session = existing ?? createProject(designFromRecord(record), record.id)
   if (existing) openProject(record.id)
-  completeGeneration(session.id)
+  // A restored local session already contains the prototype's durable build
+  // state. Only new sessions need the initial local generation transition.
+  if (!existing) completeGeneration(session.id)
   if (record.current_playable && session.playableVersions.length === 0) {
     appendPlayableVersion(session.id, {
       reason: 'initial',
@@ -94,7 +96,6 @@ onMounted(async () => {
     const records = await listProjectRecords()
     projectRecords.value = records
     for (const record of records) {
-      if (projectStore.projects.some((project) => project.id === record.id)) continue
       hydrateProjectSession(record)
     }
     projectStore.activeProjectId = null
