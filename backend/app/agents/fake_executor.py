@@ -7,7 +7,7 @@ Protocol + Fake pair pattern. Does NOT spawn any process.
 
 from __future__ import annotations
 
-from app.agents.executor import ProcessResult
+from app.agents.executor import AsyncLineCallback, ProcessResult
 
 
 class FakeProcessExecutor:
@@ -27,17 +27,25 @@ class FakeProcessExecutor:
         cwd: str,
         approved_env: dict[str, str],
         timeout: float | None,
+        on_stdout_line: AsyncLineCallback | None = None,
+        on_stderr_line: AsyncLineCallback | None = None,
     ) -> ProcessResult:
         self.runs.append(
             {"command": command, "arguments": arguments, "cwd": cwd,
              "approved_env": approved_env, "timeout": timeout}
         )
         if self.outcome == "succeeded":
+            stdout = '{"type":"system","subtype":"init"}\n{"type":"result","subtype":"success"}\n'
+            if on_stdout_line is not None:
+                for line in stdout.splitlines():
+                    await on_stdout_line(line)
             return ProcessResult(
-                stdout='{"type":"system","subtype":"init"}\n{"type":"result","subtype":"success"}\n',
+                stdout=stdout,
                 stderr="", exit_code=0, process_status="completed", duration_seconds=0.01,
             )
         if self.outcome == "failed":
+            if on_stderr_line is not None:
+                await on_stderr_line("boom")
             return ProcessResult(
                 stdout="", stderr="boom", exit_code=1, process_status="completed",
                 duration_seconds=0.01,

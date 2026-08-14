@@ -230,6 +230,85 @@ def test_large_output_is_truncated_not_unbounded(workspace) -> None:
     assert len(result.stdout) <= 4096
 
 
+def test_stdout_and_stderr_callbacks_receive_complete_lines_in_order(workspace) -> None:
+    executor = AsyncSubprocessExecutor()
+    stdout_lines: list[str] = []
+    stderr_lines: list[str] = []
+
+    async def on_stdout_line(line: str) -> None:
+        stdout_lines.append(line)
+
+    async def on_stderr_line(line: str) -> None:
+        stderr_lines.append(line)
+
+    result = run_async(
+        executor.run(
+            command=_node(),
+            arguments=[
+                "-e",
+                "console.log('first'); console.log('second'); console.error('warning')",
+            ],
+            cwd=str(workspace),
+            approved_env={},
+            timeout=None,
+            on_stdout_line=on_stdout_line,
+            on_stderr_line=on_stderr_line,
+        )
+    )
+
+    assert result.exit_code == 0
+    assert stdout_lines == ["first", "second"]
+    assert stderr_lines == ["warning"]
+
+
+def test_callback_receives_terminal_line_after_diagnostic_truncation(workspace) -> None:
+    executor = AsyncSubprocessExecutor(output_limit_bytes=128)
+    stdout_lines: list[str] = []
+
+    async def on_stdout_line(line: str) -> None:
+        stdout_lines.append(line)
+
+    result = run_async(
+        executor.run(
+            command=_node(),
+            arguments=[
+                "-e",
+                (
+                    "for (let i=0;i<20;i++) console.log(JSON.stringify({type:'assistant',i,payload:'x'.repeat(40)}));"
+                    "console.log(JSON.stringify({type:'result',subtype:'success'}));"
+                ),
+            ],
+            cwd=str(workspace),
+            approved_env={},
+            timeout=None,
+            on_stdout_line=on_stdout_line,
+        )
+    )
+
+    assert result.output_truncated is True
+    assert len(result.stdout.encode("utf-8")) <= 128
+    assert stdout_lines[-1] == '{"type":"result","subtype":"success"}'
+
+
+def test_callback_failure_terminates_process_and_propagates(workspace) -> None:
+    executor = AsyncSubprocessExecutor()
+
+    async def reject_line(_line: str) -> None:
+        raise RuntimeError("parser rejected line")
+
+    with pytest.raises(RuntimeError, match="parser rejected line"):
+        run_async(
+            executor.run(
+                command=_node(),
+                arguments=["-e", "console.log('bad'); setInterval(()=>{},1000)"],
+                cwd=str(workspace),
+                approved_env={},
+                timeout=2,
+                on_stdout_line=reject_line,
+            )
+        )
+
+
 # --------------------------------------------------------------------------- #
 # no shell=True: command is a single program, never shell-parsed
 # --------------------------------------------------------------------------- #

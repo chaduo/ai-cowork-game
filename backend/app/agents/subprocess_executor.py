@@ -24,6 +24,7 @@ import time
 from typing import Any
 
 from app.agents.executor import (
+    AsyncLineCallback,
     DEFAULT_OUTPUT_LIMIT_BYTES,
     ProcessResult,
     ProcessStatus,
@@ -54,6 +55,8 @@ class AsyncSubprocessExecutor:
         cwd: str,
         approved_env: dict[str, str],
         timeout: float | None,
+        on_stdout_line: AsyncLineCallback | None = None,
+        on_stderr_line: AsyncLineCallback | None = None,
     ) -> ProcessResult:
         self._cancel_requested = False
         self._proc = None
@@ -84,31 +87,66 @@ class AsyncSubprocessExecutor:
         stderr_buf = bytearray()
         truncated = False
 
-        async def drain(stream: asyncio.StreamReader, buf: bytearray) -> None:
+        async def drain(
+            stream: asyncio.StreamReader,
+            buf: bytearray,
+            callback: AsyncLineCallback | None,
+        ) -> None:
             nonlocal truncated
+            pending = bytearray()
             while True:
                 chunk = await stream.read(8192)
                 if not chunk:
-                    return
-                if len(buf) + len(chunk) <= self._output_limit:
+                    break
+                if len(chunk) >= self._output_limit:
+                    buf[:] = chunk[-self._output_limit :]
+                    truncated = True
+                elif len(buf) + len(chunk) <= self._output_limit:
                     buf.extend(chunk)
                 else:
-                    room = self._output_limit - len(buf)
-                    if room > 0:
-                        buf.extend(chunk[:room])
+                    overflow = len(buf) + len(chunk) - self._output_limit
+                    del buf[:overflow]
+                    buf.extend(chunk)
                     truncated = True
-                    # keep draining to EOF so the child can finish, but drop the rest
+                if callback is not None:
+                    pending.extend(chunk)
+                    while True:
+                        newline = pending.find(b"\n")
+                        if newline < 0:
+                            break
+                        raw_line = bytes(pending[:newline])
+                        del pending[: newline + 1]
+                        await callback(raw_line.rstrip(b"\r").decode("utf-8", errors="replace"))
+            if callback is not None and pending:
+                await callback(bytes(pending).rstrip(b"\r").decode("utf-8", errors="replace"))
 
-        drain_out = asyncio.ensure_future(drain(self._proc.stdout, stdout_buf))
-        drain_err = asyncio.ensure_future(drain(self._proc.stderr, stderr_buf))
+        drain_out = asyncio.ensure_future(drain(self._proc.stdout, stdout_buf, on_stdout_line))
+        drain_err = asyncio.ensure_future(drain(self._proc.stderr, stderr_buf, on_stderr_line))
+        process_wait = asyncio.ensure_future(self._proc.wait())
+
+        async def wait_for_completion() -> int:
+            done, _pending = await asyncio.wait(
+                {process_wait, drain_out, drain_err},
+                return_when=asyncio.FIRST_EXCEPTION,
+            )
+            for task in (drain_out, drain_err):
+                if task in done and not task.cancelled() and task.exception() is not None:
+                    error = task.exception()
+                    await self._kill_tree()
+                    await asyncio.gather(process_wait, drain_out, drain_err, return_exceptions=True)
+                    assert error is not None
+                    raise error
+            exit_status = await process_wait
+            await asyncio.gather(drain_out, drain_err)
+            return exit_status
 
         process_status: ProcessStatus = "completed"
         exit_code: int | None = None
         try:
             if timeout is None:
-                exit_code = await self._proc.wait()
+                exit_code = await wait_for_completion()
             else:
-                exit_code = await asyncio.wait_for(self._proc.wait(), timeout=timeout)
+                exit_code = await asyncio.wait_for(wait_for_completion(), timeout=timeout)
         except asyncio.TimeoutError:
             process_status = "timed_out"
             await self._kill_tree()
@@ -125,8 +163,8 @@ class AsyncSubprocessExecutor:
                 await self._kill_tree()
                 exit_code = self._proc.returncode
 
-        # Make sure the drain tasks finish (proc exited or was killed).
-        await asyncio.gather(drain_out, drain_err, return_exceptions=True)
+        # Make sure all child-facing tasks finish after timeout or cancellation.
+        await asyncio.gather(process_wait, drain_out, drain_err, return_exceptions=True)
 
         duration = time.monotonic() - start
         return ProcessResult(

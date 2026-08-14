@@ -20,6 +20,7 @@ Contract source of truth:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Awaitable, Callable
 from typing import Literal, Protocol
 
 # C09 distinguishes process termination cause. C10 maps these onto GameBuildStatus:
@@ -30,6 +31,7 @@ from typing import Literal, Protocol
 # timed_out vs cancelled cannot be read from the process stream — the executor
 # knows which trigger fired (deadline reached vs an explicit cancel() call).
 ProcessStatus = Literal["completed", "timed_out", "cancelled"]
+AsyncLineCallback = Callable[[str], Awaitable[None]]
 
 # Soft cap on captured stdout/stderr to bound memory. Anything beyond is truncated
 # and flagged via ``ProcessResult.output_truncated`` so the adapter can surface a
@@ -66,6 +68,8 @@ class ProcessExecutor(Protocol):
         cwd: str,
         approved_env: dict[str, str],
         timeout: float | None,
+        on_stdout_line: AsyncLineCallback | None = None,
+        on_stderr_line: AsyncLineCallback | None = None,
     ) -> ProcessResult:
         """Run ``command arguments`` in ``cwd`` with only ``approved_env``.
 
