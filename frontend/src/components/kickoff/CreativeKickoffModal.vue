@@ -11,6 +11,7 @@ import ThinkingIndicator from './ThinkingIndicator.vue'
 import { buildScenarioSummary, getFollowUpQuestion, iterationDirections, iterationQuestions, resolveKickoffScenario } from './kickoffFixtures'
 import type { Choice, ConfirmedGameDesign, Decision, KickoffPhase, Question } from './kickoffTypes'
 import type { CreatorGameDesignDraft } from '../../contracts/creatorGameDesign'
+import { readinessForDesignStatus } from '../../contracts/designReadiness'
 
 const props = withDefaults(
   defineProps<{
@@ -104,6 +105,7 @@ function currentDraft(): CreatorGameDesignDraft {
       status,
       custom_input: iterationNote.value ?? '',
     },
+    readiness: readinessForDesignStatus(status),
   }
 }
 
