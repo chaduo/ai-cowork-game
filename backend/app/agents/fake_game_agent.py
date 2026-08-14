@@ -12,6 +12,7 @@ from app.contracts.game_agent import (
     GameBuildRequest,
     GameBuildResult,
     GameBuildStatus,
+    PendingDecision,
     RunEvent,
 )
 
@@ -94,6 +95,34 @@ class FakeGameAgent(GameAgent):
                 metadata={"backend": "fake", "operation": request.operation},
             )
             return events, result
+
+        if status == "waiting_for_input":
+            decision_id = f"decision-{request.operation}-{handle.run_id.rsplit('-', 1)[-1]}"
+            decision = PendingDecision(
+                decision_id=decision_id,
+                prompt="选择下一步构建策略",
+                input_type="choice",
+                options=["继续默认方案", "调整当前范围"],
+            )
+            events = [
+                RunEvent(run_id=handle.run_id, sequence=1, stage="building", kind="started", message="Build started", progress=0, timestamp=now),
+                RunEvent(
+                    run_id=handle.run_id,
+                    sequence=2,
+                    stage="waiting_for_input",
+                    kind="build.needs_input",
+                    message=decision.prompt,
+                    progress=None,
+                    timestamp=now,
+                    decision_id=decision.decision_id,
+                ),
+            ]
+            return events, GameBuildResult(
+                status="waiting_for_input",
+                diagnostics=[Diagnostic(level="info", message="Waiting for user input", code="waiting_for_input")],
+                metadata={"backend": "fake", "operation": request.operation},
+                pending_decision=decision,
+            )
 
         error_by_status = {
             "cancelled": ("cancelled", "Build cancelled"),

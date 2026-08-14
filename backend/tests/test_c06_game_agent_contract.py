@@ -6,10 +6,15 @@ from pydantic import ValidationError
 
 from app.contracts.game_agent import (
     AgentRunHandle,
+    AffectedScope,
     ArtifactManifestEntry,
+    BuildOverride,
+    ContractProfile,
     ContractError,
     GameBuildRequest,
     GameBuildResult,
+    PendingDecision,
+    ResourceReference,
     RunEvent,
     WorkspaceRef,
 )
@@ -58,6 +63,24 @@ def valid_request() -> GameBuildRequest:
         workspace=WorkspaceRef(root="/tmp/run-1", allowed_paths=["dist", "src"]),
         baseline_playable=None,
         request_text="创建第一版可试玩版本",
+        affected_scope=AffectedScope(sections=["gameplay", "characters"], description="关系玩法 first playable"),
+        resource_references=[ResourceReference(
+            resource_id="relationship-system",
+            resource_revision="resource-v1",
+            source_project_id="project-source",
+            source_release_id="release-1",
+            snapshot_hash="a" * 64,
+            role="characters",
+        )],
+        relevant_overrides=[BuildOverride(
+            key="relationship.max_favor",
+            value=100,
+            source="user",
+            provenance="gamespec-draft-v2",
+        )],
+        game_design_profile=ContractProfile(name="creator-game-design", version="1", capabilities=["clarification"]),
+        gamespec_profile=ContractProfile(name="creator-gamespec", version="1", capabilities=["relationship"]),
+        game_build_profile=ContractProfile(name="runtime-build", version="1", capabilities=["create", "modify"]),
     )
 
 
@@ -67,6 +90,25 @@ def test_game_build_request_contains_provider_neutral_inputs() -> None:
     assert request.operation == "create"
     assert request.runtime_build_spec.project_title == "关系农场"
     assert request.workspace.root == "/tmp/run-1"
+    assert request.affected_scope.sections == ["gameplay", "characters"]
+    assert request.resource_references[0].source_project_id == "project-source"
+    assert request.relevant_overrides[0].provenance == "gamespec-draft-v2"
+    assert request.game_build_profile.version == "1"
+
+
+def test_game_build_request_defaults_context_for_legacy_callers() -> None:
+    request = valid_request().model_copy(update={
+        "affected_scope": AffectedScope(),
+        "resource_references": [],
+        "relevant_overrides": [],
+    })
+
+    assert request.affected_scope.sections == []
+    assert request.resource_references == []
+    assert request.relevant_overrides == []
+    assert request.game_design_profile.name
+    assert request.gamespec_profile.name
+    assert request.game_build_profile.name
 
 
 def test_game_build_result_accepts_success_and_structured_artifacts() -> None:
@@ -98,6 +140,27 @@ def test_game_build_result_accepts_standard_unsupported_status() -> None:
     assert result.status == "unsupported"
     assert result.error is not None
     assert result.error.code == "unsupported_operation"
+
+
+def test_game_build_result_waiting_for_input_is_non_terminal() -> None:
+    result = GameBuildResult(
+        status="waiting_for_input",
+        pending_decision=PendingDecision(
+            decision_id="decision-1",
+            prompt="选择关系反馈方式",
+            input_type="choice",
+            options=["心形", "进度条"],
+        ),
+    )
+
+    assert result.status == "waiting_for_input"
+    assert result.pending_decision is not None
+    assert result.pending_decision.decision_id == "decision-1"
+
+
+def test_waiting_for_input_requires_a_pending_decision() -> None:
+    with pytest.raises(ValidationError):
+        GameBuildResult(status="waiting_for_input")
 
 
 def test_run_event_rejects_progress_outside_zero_to_one() -> None:
@@ -160,6 +223,28 @@ def test_run_event_rejects_resource_save_gate_equivalent() -> None:
         )
 
 
+def test_run_event_needs_input_requires_stable_decision_id() -> None:
+    event = RunEvent(
+        run_id="run-1",
+        sequence=1,
+        stage="building",
+        kind="build.needs_input",
+        message="需要选择关系反馈方式",
+        progress=None,
+        artifact_ref=None,
+        error=None,
+        timestamp=datetime.now(timezone.utc),
+        decision_id="decision-1",
+    )
+
+    assert event.decision_id == "decision-1"
+
+    invalid = event.model_dump(mode="json")
+    invalid["decision_id"] = None
+    with pytest.raises(ValidationError):
+        RunEvent.model_validate(invalid)
+
+
 def test_contract_models_reject_unknown_fields() -> None:
     with pytest.raises(ValidationError):
         AgentRunHandle(run_id="run-1", build_id="build-1", provider_session_id="secret")
@@ -218,6 +303,20 @@ def test_fake_agent_cancel_produces_cancelled_result_and_terminal_event() -> Non
     assert events[-1].kind == "cancelled"
     assert events[-1].error is not None
     assert events[-1].error.code == "cancelled"
+
+
+def test_fake_agent_can_pause_for_input_without_terminal_error() -> None:
+    agent = FakeGameAgent(outcome_by_operation={"create": "waiting_for_input"})
+    handle = run_async(agent.start(valid_request()))
+
+    result = run_async(agent.result(handle))
+    events = run_async(collect_events(agent, handle))
+
+    assert result.status == "waiting_for_input"
+    assert result.pending_decision is not None
+    assert result.pending_decision.decision_id == "decision-create-1"
+    assert events[-1].kind == "build.needs_input"
+    assert events[-1].decision_id == "decision-create-1"
 
 
 @pytest.mark.parametrize("status", ["timed_out", "invalid_output", "failed"])
