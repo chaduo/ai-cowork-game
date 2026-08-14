@@ -5,7 +5,7 @@ AI Cowork Game 是一个面向创作者的 AI 游戏协作原型：用户从 Ide
 当前仓库包含两部分：
 
 - `frontend/`：Vue 3 + TypeScript + Vite 的产品原型。
-- `test/agent-game-forge/`：独立的 OpenGame / Agent Game Forge 工具仓库，以 Git submodule 方式接入。它不是主项目的普通源码目录，也不在主仓库内复制维护。
+- `vendor/opengame/`：OpenGame CLI（fork [CodingZY/OpenGame](https://github.com/CodingZY/OpenGame)），以 Git submodule 方式接入并 pin 在 commit `c54307e`（`opengame` v0.6.0）。它是 V1 的 GameAgent runtime 依赖，不是主项目源码，也不在主仓库内复制维护。安装与调用见 [`docs/development/c08-opengame-spike/`](docs/development/c08-opengame-spike/README.md)。
 
 ## 快速开始
 
@@ -30,9 +30,9 @@ npm run build
 
 ## OpenGame 子模块
 
-本项目当前使用的子模块路径是 `test/agent-game-forge`。它对应独立仓库：
+本项目使用的子模块路径是 `vendor/opengame`，对应 fork 仓库：
 
-<https://github.com/0x0funky/agent-game-forge>
+<https://github.com/CodingZY/OpenGame>（上游 [leigest519/OpenGame](https://github.com/leigest519/OpenGame)），pin 在 commit `c54307e`，`opengame` v0.6.0。
 
 第一次克隆主仓库后必须初始化子模块：
 
@@ -40,7 +40,16 @@ npm run build
 git submodule update --init --recursive
 ```
 
-进入子模块开发时，先在子模块自己的目录内创建 branch、提交和推送；主仓库只提交子模块指针变化。子模块的依赖安装、运行命令和发布方式以它自己的 `README.md` 为准。
+在本地把 `opengame` 命令装到 PATH（C08 spike 已验证的步骤）：
+
+```bash
+cd vendor/opengame
+npm install
+npm link          # 暴露 opengame 到全局 PATH
+opengame --version   # → 0.6.0
+```
+
+进入子模块开发时，先在子模块自己的目录内创建 branch、提交并推送到 CodingZY/OpenGame；主仓库只提交子模块指针（`vendor/opengame`）变化。子模块的依赖安装、运行命令和发布方式以它自己的 `README.md` 为准；版本与调用契约见 [`docs/development/c08-opengame-spike/`](docs/development/c08-opengame-spike/README.md)。不要把子模块目录转成普通文件夹，也不要在主仓库复制一份 OpenGame 源码。
 
 ## 文档入口
 

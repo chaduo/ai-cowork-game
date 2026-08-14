@@ -3,7 +3,8 @@
 - [ ] 1.1 Scaffold Vue, FastAPI, Phaser template, deployment, and test directories with pinned toolchain versions.
 - [ ] 1.2 Define runtime command/result, RunEvent, Candidate, TestReport, and Version schemas with serialization tests.
 - [ ] 1.3 Implement a Fake Runtime and a provider-neutral contract test suite for create, modify, cancel, events, artifacts, and failures.
-- [ ] 1.4 Spike the real OpenGame CLI to fix its version, non-interactive invocation, output mapping, workspace behavior, timeout, and cancellation contract.
+- [x] 1.4 Spike the real OpenGame CLI to fix its version, non-interactive invocation, output mapping, workspace behavior, timeout, and cancellation contract. — Done 2026-08-14: pinned `CodingZY/OpenGame`@`c54307e` (`opengame` v0.6.0), real game generated, success fixture `docs/development/c08-opengame-spike/success-run.stream.json`. Non-interactive args: `opengame -p "<prompt>" --yolo --auth-type openai -m <model> -o stream-json`, cwd = run workspace. stream-json = NDJSON `system`/`assistant`/`result` → RunEvent. Remaining: failure/cancel/invalid-output/timeout fixtures.
+- [ ] 1.5 Pin OpenGame as `vendor/opengame` submodule at commit `c54307e`; remove the mislabeled `test/agent-game-forge` submodule; update README/CONTRIBUTING to point at `vendor/opengame`. (Contract/docs change; OpenGame source stays in the submodule, never copied into the main repo.)
 
 ## 2. Persistent Platform Workflow
 

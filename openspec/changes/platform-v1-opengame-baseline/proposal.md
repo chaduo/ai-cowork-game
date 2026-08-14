@@ -33,6 +33,11 @@ None. This is the first OpenSpec baseline.
 
 - Affects the FastAPI workflow, SQLite schema, runtime adapter, isolated runner, Git repository service,
   Phaser template tests, SSE contract, Vue review/status/history views, and deployment configuration.
-- Adds OpenGame CLI as a pinned V1 dependency.
+- Adds OpenGame CLI as a pinned V1 dependency via a `vendor/opengame` git submodule pointing at
+  `https://github.com/CodingZY/OpenGame` commit `c54307e` (`opengame` v0.6.0); the main repo stores only the
+  submodule pointer, never the OpenGame source. The previously-attached `test/agent-game-forge` submodule is
+  removed — it was mislabeled as "OpenGame" but is an unrelated project (0x0funky's Agent Game Forge daemon)
+  and not the Adapter target. See `docs/development/c08-opengame-spike/` for the resolved version, non-interactive
+  invocation, and stream-json output contract.
 - Establishes contracts that Platform V2 must reuse; V2 implementation must not begin by bypassing or
   replacing these publication and safety gates.
