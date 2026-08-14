@@ -51,3 +51,12 @@ The kickoff modal now maps its `ready`/`confirming`/`confirmed` clarification ph
 node --experimental-strip-types --test frontend/tests/designReadiness.test.mjs
 # 3 passed
 ```
+
+## Follow-up refresh recovery
+
+When a persisted local session is still `generating` but the backend has no GameSpec yet, the expected API response is `gamespec_not_found` (HTTP 404). K02 now treats that response as an interrupted deterministic generation, resumes the generation timer, and reaches `review`; it does not restart sessions that already have a draft or confirmed GameSpec.
+
+```text
+node --experimental-strip-types --test frontend/tests/gamespecRecovery.test.mjs
+# 2 passed
+```
