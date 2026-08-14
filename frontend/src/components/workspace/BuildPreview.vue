@@ -41,8 +41,8 @@ const relationshipSummary = computed(() => snapshot.value?.relationshipSummary ?
   <section v-if="!available" class="build-preview-empty">
     <span><LoaderCircle :size="22" class="spin" /></span>
     <small>PREVIEW</small>
-    <h2>Preparing runnable build…</h2>
-    <p>Core Gameplay 完成后，这里会出现第一个 Working Build。</p>
+    <h2>第一个 Playable 正在构建中…</h2>
+    <p>Build 完成并通过验证后，这里会自动显示可试玩版本。</p>
   </section>
 
   <article v-else class="build-preview-view">

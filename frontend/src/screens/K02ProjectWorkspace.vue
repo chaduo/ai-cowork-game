@@ -148,7 +148,7 @@ const generationSteps = computed(() => [
 ])
 
 watch(phase, (nextPhase) => {
-  if (nextPhase === 'spec_confirmed' || isBuildTimelineMode.value) activeTab.value = 'build'
+  if (nextPhase === 'spec_confirmed') activeTab.value = 'build'
   else if (previewPhases.includes(nextPhase) || nextPhase === 'scope_violation') activeTab.value = 'preview'
 })
 
