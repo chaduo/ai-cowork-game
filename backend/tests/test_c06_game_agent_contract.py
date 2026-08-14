@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 
 import pytest
@@ -12,6 +13,7 @@ from app.contracts.game_agent import (
     RunEvent,
     WorkspaceRef,
 )
+from app.agents.fake_game_agent import FakeGameAgent
 from app.contracts.gamespec import CreatorGameSpec
 
 
@@ -130,3 +132,61 @@ def test_run_event_rejects_human_gate_decisions() -> None:
 def test_contract_models_reject_unknown_fields() -> None:
     with pytest.raises(ValidationError):
         AgentRunHandle(run_id="run-1", build_id="build-1", provider_session_id="secret")
+
+
+def run_async(coroutine):
+    return asyncio.run(coroutine)
+
+
+async def collect_events(agent: FakeGameAgent, handle: AgentRunHandle):
+    return [event async for event in agent.stream_events(handle)]
+
+
+def test_fake_agent_returns_deterministic_success_and_ordered_events() -> None:
+    agent = FakeGameAgent()
+    handle = run_async(agent.start(valid_request()))
+
+    events = run_async(collect_events(agent, handle))
+    result = run_async(agent.result(handle))
+
+    assert handle.run_id == "fake-run-1"
+    assert [event.sequence for event in events] == [1, 2, 3]
+    assert result.status == "succeeded"
+    assert result.preview_entry == "dist/index.html"
+
+
+def test_fake_agent_returns_unsupported_for_unknown_operation() -> None:
+    agent = FakeGameAgent()
+    request = valid_request().model_copy(update={"operation": "stream_assets"})
+    handle = run_async(agent.start(request))
+
+    result = run_async(agent.result(handle))
+
+    assert result.status == "unsupported"
+    assert result.error is not None
+    assert result.error.code == "unsupported_operation"
+
+
+def test_fake_agent_cancel_produces_cancelled_result_and_terminal_event() -> None:
+    agent = FakeGameAgent()
+    handle = run_async(agent.start(valid_request()))
+    run_async(agent.cancel(handle))
+
+    result = run_async(agent.result(handle))
+    events = run_async(collect_events(agent, handle))
+
+    assert result.status == "cancelled"
+    assert events[-1].kind == "cancelled"
+    assert events[-1].error is not None
+    assert events[-1].error.code == "cancelled"
+
+
+@pytest.mark.parametrize("status", ["timed_out", "invalid_output", "failed"])
+def test_fake_agent_maps_provider_outcomes_to_standard_results(status: str) -> None:
+    agent = FakeGameAgent(outcome_by_operation={"create": status})
+    handle = run_async(agent.start(valid_request()))
+
+    result = run_async(agent.result(handle))
+
+    assert result.status == status
+    assert result.error is not None
