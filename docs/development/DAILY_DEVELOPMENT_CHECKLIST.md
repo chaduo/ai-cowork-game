@@ -2,18 +2,20 @@
 
 > 用途：zhao 与 zhang 每天从这里开工、验收和收尾。目标不是记录“做过什么”，而是每天把一个可验证的真实纵向切片合并到 `main`。
 
-## 1. 三份文档怎么一起用
+## 1. 四份文档怎么一起用
 
-每天只按下面顺序看三份文档，不在聊天记录里重新定义范围：
+每天只按下面顺序看四份文档，不在聊天记录里重新定义范围：
 
-1. [`V1_CHANGE_CATALOG.md`](./V1_CHANGE_CATALOG.md)：确认 Change 的目标、Owner、依赖、范围和验收标准。
-2. [`V1_DEMO_IMPLEMENTATION_SCHEDULE_2026-08-20.md`](./V1_DEMO_IMPLEMENTATION_SCHEDULE_2026-08-20.md)：确认今天做哪些 Change、时间盒和日终 Gate。
-3. 本文档：执行当天的开工、开发、验证、Review、合并和日终记录。
+1. [`../product/AI_COWORK_GAME_V1_DESIGN_SPEC.md`](../product/AI_COWORK_GAME_V1_DESIGN_SPEC.md)：确认产品事实、完整 V1 范围和 Human Gate。
+2. [`V1_CHANGE_CATALOG.md`](./V1_CHANGE_CATALOG.md)：确认 Change 的目标、Owner、依赖、范围和验收标准。
+3. [`V1_FULL_SCOPE_REBASELINE_2026-08-20.md`](./V1_FULL_SCOPE_REBASELINE_2026-08-20.md)：确认今天做哪些 Change、时间盒和日终 Gate。
+4. 本文档：执行当天的开工、开发、验证、Review、合并和日终记录。
 
 优先级发生冲突时：
 
 ```text
-已批准的 OpenSpec contract
+已批准的 V1 Design Spec
+> 当前 Change 的 OpenSpec contract
 > V1_CHANGE_CATALOG
 > 8 月 20 日倒排计划
 > 当前实现和聊天记录

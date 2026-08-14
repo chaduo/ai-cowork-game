@@ -570,6 +570,21 @@ export function startBuildTimeline(projectId: string): void {
   advanceBuild(projectId, 0)
 }
 
+const cancellableBuildPhases: BuildPhase[] = [
+  'build_starting', 'building_foundation', 'building_core', 'building_interaction',
+  'building_presentation', 'building_progression', 'validating', 'auto_fixing', 'validating_complete',
+]
+
+export function cancelBuild(projectId: string): void {
+  const session = getProject(projectId)
+  if (!session || !cancellableBuildPhases.includes(session.phase as BuildPhase)) return
+  clearJob(projectId, 'generation')
+  clearJob(projectId, 'build')
+  session.phase = 'review'
+  session.messages.push({ id: `build-cancelled-${Date.now()}`, role: 'system', text: 'Build 已取消。当前 GameSpec 保持不变，可以调整后重新确认。' })
+  touchProject(session)
+}
+
 export function retryBuild(projectId: string): void {
   const session = getProject(projectId)
   if (!session || session.phase !== 'build_error') return
