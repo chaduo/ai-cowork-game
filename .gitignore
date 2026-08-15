@@ -29,6 +29,7 @@ secrets.json
 *.sqlite
 *.sqlite3
 .ogf/
+data/workspaces/
 
 # Operating-system files
 .DS_Store

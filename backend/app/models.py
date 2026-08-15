@@ -145,6 +145,12 @@ class Run(Base):
     cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     failure_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
     failure_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # C13: absolute prepared run workspace path + coarse lifecycle status
+    # (prepared | discarded | imported). NULL for pre-C13 / Fake / test runs that
+    # never touch disk. Lets orphan recovery discard partials and retry prove it
+    # did not reuse a prior partial workspace.
+    workspace_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    workspace_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
