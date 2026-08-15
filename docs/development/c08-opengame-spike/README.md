@@ -53,7 +53,7 @@ embedded in arguments or evidence. Output is NDJSON containing `system`,
 
 | Operation | Conclusion | Evidence boundary |
 |---|---|---|
-| create | **Supported and observed.** A real run produced an `index.html` game artifact. | Sanitized `success-run.stream.json`; raw evidence remains local. |
+| create | **Supported and observed.** A real run exited 0 and produced a validated `index.html` game artifact. | `create-run.provenance.json` plus sanitized `success-run.stream.json`; raw provider output remains local. |
 | modify | **Unsupported for V1 until a baseline-playable modify run is captured.** Resume flags exist, but flag presence is not proof of the required modify semantics. | No accepted real modify evidence yet. |
 | cancel | **Supported by the platform executor.** An interrupted provider stream may end without `result`. | `cancel-run.stream.json` plus C09 process-tree tests. |
 | timeout | **Supported by the platform executor.** Timeout can leave partial files and no `result`; those files are never a valid candidate. | `timeout-run.stream.json` plus C09 process-tree tests. |
@@ -88,6 +88,9 @@ session identifiers, and other sensitive metadata, so it must not be committed.
 The committed `*-run.stream.json` files are minimized, sanitized derivatives
 that preserve only contract-relevant event shapes. They intentionally omit
 session IDs, UUIDs, local paths, private reasoning blocks, and credentials.
+`create-run.provenance.json` preserves the reviewable CLI commit, sanitized
+command shape, exit status, terminal event, and artifact checks without storing
+credentials or a developer path.
 
 Run a local capture only after exporting credentials:
 

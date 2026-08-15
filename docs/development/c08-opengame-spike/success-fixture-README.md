@@ -2,6 +2,8 @@
 
 The committed stream fixtures are reviewable contract samples derived from real
 OpenGame 0.6.0 observations. They are deliberately not byte-for-byte raw logs.
+The matching create command, locked commit, exit code, and artifact checks are
+recorded in `create-run.provenance.json`.
 
 | Fixture | Contract observation |
 |---|---|

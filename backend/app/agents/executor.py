@@ -37,6 +37,11 @@ AsyncLineCallback = Callable[[str], Awaitable[None]]
 class ExecutorBusyError(RuntimeError):
     """Raised when one executor instance is asked to own two active runs."""
 
+
+class OutputLineTooLongError(RuntimeError):
+    """Raised when callback framing exceeds the configured memory bound."""
+
+
 # Soft cap on captured stdout/stderr to bound memory. Anything beyond is truncated
 # and flagged via ``ProcessResult.output_truncated`` so the adapter can surface a
 # diagnostic without carrying an unbounded buffer.
@@ -83,6 +88,10 @@ class ProcessExecutor(Protocol):
         found); the parent's other environment variables are NOT inherited. If
         ``timeout`` elapses, the whole process tree is killed and ``process_status``
         is ``timed_out``.
+
+        Callback lines share the executor's output byte limit. A provider line
+        that exceeds it is rejected with ``OutputLineTooLongError`` rather than
+        buffered without bound.
         """
         ...
 

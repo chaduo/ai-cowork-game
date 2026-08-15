@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-08-14",
+  "operation": "create",
+  "opengame_commit": "c54307efe1dab927e7fc52dbb92af6b3df1d1c66",
+  "opengame_version": "0.6.0",
+  "command": [
+    "node",
+    "vendor/opengame/dist/cli.js",
+    "-p",
+    "Build a Snake clone with WASD controls and a dark theme.",
+    "--yolo",
+    "--auth-type",
+    "openai",
+    "-m",
+    "kimi-k3",
+    "-o",
+    "stream-json"
+  ],
+  "cwd": "<ISOLATED_WORKSPACE>",
+  "approved_environment_names": [
+    "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+    "OPENAI_MODEL",
+    "GEMINI_SANDBOX"
+  ],
+  "exit_code": 0,
+  "terminal_event": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false
+  },
+  "artifact_checks": {
+    "preview_entry": "index.html",
+    "preview_entry_exists": true,
+    "javascript_syntax_check": "passed",
+    "artifact_smoke_check": "passed",
+    "output_tree": [
+      "index.html",
+      "main.js",
+      "style.css",
+      "test/smoke.cjs"
+    ]
+  },
+  "raw_evidence_policy": "Raw provider output is local-only; success-run.stream.json is its sanitized contract derivative."
+}

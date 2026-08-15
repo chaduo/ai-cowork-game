@@ -42,11 +42,14 @@ COMMAND=(
 
 set +e
 if [[ "$SCENARIO" == "failure" ]]; then
-  OPENAI_BASE_URL="https://invalid-opengame-provider.local/v1" \
-    "${COMMAND[@]}" >"$OUT" 2>"$ERR"
+  (
+    cd "$WORKSPACE"
+    OPENAI_BASE_URL="https://invalid-opengame-provider.local/v1" \
+      exec "${COMMAND[@]}" >"$OUT" 2>"$ERR"
+  )
   STATUS=$?
 elif [[ "$SCENARIO" == "timeout" || "$SCENARIO" == "cancel" ]]; then
-  (cd "$WORKSPACE" && "${COMMAND[@]}" >"$OUT" 2>"$ERR") &
+  (cd "$WORKSPACE" && exec "${COMMAND[@]}" >"$OUT" 2>"$ERR") &
   PID=$!
   WAIT_SECONDS=12
   [[ "$SCENARIO" == "cancel" ]] && WAIT_SECONDS=15

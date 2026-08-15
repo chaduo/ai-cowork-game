@@ -58,6 +58,7 @@ def test_portable_capture_script_has_no_developer_paths_or_secret_interpolation(
     assert "D:\\" not in script
     assert "powershell" not in script.lower()
     assert "OPENAI_API_KEY='" not in script
+    assert 'if [[ "$SCENARIO" == "failure" ]]; then\n  (\n    cd "$WORKSPACE"' in script
 
 
 def test_c08_setup_builds_the_pinned_source_checkout() -> None:
@@ -68,3 +69,17 @@ def test_c08_setup_builds_the_pinned_source_checkout() -> None:
     assert "npm run build" in report
     assert "npm ci" in script
     assert "npm run build" in script
+
+
+def test_create_claim_has_committed_reviewable_provenance() -> None:
+    provenance = json.loads((EVIDENCE_DIR / "create-run.provenance.json").read_text())
+
+    assert provenance["opengame_commit"] == "c54307efe1dab927e7fc52dbb92af6b3df1d1c66"
+    assert provenance["operation"] == "create"
+    assert provenance["command"][0:2] == ["node", "vendor/opengame/dist/cli.js"]
+    assert provenance["exit_code"] == 0
+    assert provenance["terminal_event"]["type"] == "result"
+    assert provenance["terminal_event"]["is_error"] is False
+    assert provenance["artifact_checks"]["preview_entry"] == "index.html"
+    assert provenance["artifact_checks"]["preview_entry_exists"] is True
+    assert "index.html" in provenance["artifact_checks"]["output_tree"]
