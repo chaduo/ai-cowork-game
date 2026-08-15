@@ -6,11 +6,13 @@ import json
 import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents.game_agent import GameAgent
+from app.agents.workspace import WorkspaceManager, WorkspacePaths
 from app.contracts.game_agent import (
     AffectedScope,
     AgentRunHandle,
@@ -39,11 +41,14 @@ class BuildJob:
 
 
 class BuildService:
-    def __init__(self, session: Session, agent: GameAgent) -> None:
+    def __init__(self, session: Session, agent: GameAgent, *, workspace_manager: WorkspaceManager | None = None) -> None:
         self.session = session
         self.agent = agent
         self.lifecycle = ProjectLifecycleService(session)
         self.runs = RunRepository(session)
+        # C13: owns per-run workspace creation + discard. Default roots at
+        # data/workspaces (gitignored runtime data); tests inject a tmp-rooted one.
+        self._workspace = workspace_manager or WorkspaceManager()
         self._handles: dict[str, AgentRunHandle] = {}
 
     def create_build(
@@ -106,13 +111,16 @@ class BuildService:
         context = self._ensure_context(build)
         creator = CreatorGameSpec.model_validate_json(context.gamespec_snapshot_json)
         runtime = RuntimeBuildSpec.model_validate_json(context.runtime_build_spec_json)
+        # C13: run against the prepared isolated workspace (absolute). Falls back
+        # to a relative path only for pre-C13 runs with no persisted workspace.
+        root = run.workspace_path or f"runs/{run.id}"
         return GameBuildRequest(
             project_id=context.project_id,
             build_id=build.id,
             operation=context.operation,
             creator_game_spec=creator,
             runtime_build_spec=runtime,
-            workspace=WorkspaceRef(root=f"runs/{run.id}", allowed_paths=["dist", "logs"]),
+            workspace=WorkspaceRef(root=root, allowed_paths=["dist", "logs"]),
             baseline_playable=context.baseline_playable_version_id,
             request_text=context.request_text,
             affected_scope=AffectedScope.model_validate_json(context.affected_scope_json),
@@ -124,12 +132,39 @@ class BuildService:
             game_build_profile=ContractProfile.model_validate_json(context.game_build_profile_json),
         )
 
+    def _prepare_workspace(self, run: Run) -> WorkspacePaths:
+        """Create the isolated run workspace and persist its absolute path.
+
+        Idempotent: a run with a persisted workspace_path is not re-prepared. V1
+        uses one session per run (session_id = run.id); the {run_id}/{session_id}
+        layout is retained for future multi-session resume.
+        """
+        if run.workspace_path:
+            return WorkspacePaths(run_id=run.id, session_id=run.id, root=Path(run.workspace_path))
+        paths = self._workspace.prepare(run.id, run.id)
+        run.workspace_path = str(paths.root)
+        run.workspace_status = "prepared"
+        self.session.flush()
+        return paths
+
+    def _discard_workspace(self, run: Run) -> None:
+        """Discard a (partial) workspace after cancel/failure/orphan and mark it.
+
+        run-observability spec: a partial workspace is never trusted or reused on
+        retry — retry gets a fresh run_id and thus a fresh workspace.
+        """
+        if run.workspace_path:
+            self._workspace.discard_run(run.id)
+        run.workspace_status = "discarded"
+        self.session.flush()
+
     async def execute_build(self, build_id: str) -> GameBuildResult:
         build, run = self._job_records(build_id)
         if run.status == "waiting_for_input":
             return self._waiting_result(build, run)
         if run.status not in RUN_EXECUTION_STATUSES:
             return self._result_from_records(build, run)
+        self._prepare_workspace(run)  # C13: isolated workspace before the agent runs
         request = self._request_for(build, run)
         try:
             handle = await self.agent.start(request)
@@ -149,6 +184,7 @@ class BuildService:
         if run.status not in RUN_ACTIVE_STATUSES:
             return self._result_from_records(build, run)
         self.runs.request_cancel(run.id)
+        self._prepare_workspace(run)  # C13: ensure a workspace exists for a fallback start
         handle = self._handles.get(build.id)
         try:
             if handle is None:
@@ -172,6 +208,9 @@ class BuildService:
         retry = self.lifecycle.retry_build(build_id)
         parent_context = self._ensure_context(prior)
         self._copy_context(parent_context, retry)
+        # C13: a fresh run_id means a fresh workspace — the prior run's partial
+        # workspace was already discarded on its terminal/cancel/failure (or by
+        # orphan recovery). retry never reuses a prior workspace path.
         run = self.runs.create_run(f"run-{retry.id}", retry.id)
         self.session.flush()
         return BuildJob(retry.id, run.id)
@@ -179,6 +218,16 @@ class BuildService:
     def recover_orphaned_jobs(self) -> int:
         runs_recovered = self.runs.recover_orphaned_runs()
         builds_recovered = self.lifecycle.recover_orphaned_builds()
+        # C13: any run that still holds a prepared workspace but is no longer
+        # active (orphaned by a restart, or otherwise lingering) leaves a partial
+        # workspace on disk — discard it so it is never trusted or reused.
+        lingering = self.session.scalars(
+            select(Run).where(Run.workspace_status == "prepared")
+        )
+        for run in lingering:
+            if run.status not in RUN_ACTIVE_STATUSES:
+                self._discard_workspace(run)
+        self.session.flush()
         return max(runs_recovered, builds_recovered)
 
     async def _consume_agent(self, build: Build, run: Run, handle: AgentRunHandle) -> GameBuildResult:
@@ -235,6 +284,11 @@ class BuildService:
             diagnostics_json=diagnostics_json or None,
             build_context_id=self._ensure_context(build).id,
         )
+        # C13: a non-success run leaves a partial workspace — discard it so a
+        # later retry can never trust or reuse it. A succeeded run keeps its
+        # workspace (the artifact lives there until C14/C20 promote/import it).
+        if result.status != "succeeded":
+            self._discard_workspace(run)
         self.session.flush()
         self._handles.pop(build.id, None)
         return result
