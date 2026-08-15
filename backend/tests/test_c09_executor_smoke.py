@@ -31,24 +31,34 @@ def _node() -> str:
     return node or ""
 
 
-def _opengame_cli_js() -> str | None:
-    """Find opengame's dist/cli.js. Prefer the globally npm-link'd install."""
-    candidates = [
-        # global npm link target on this machine
-        r"D:\Program Files (x86)\nodejs\node_global\node_modules\@opengame\opengame\dist\cli.js",
-    ]
-    # Also try to resolve from the opengame on PATH -> its package dir.
-    og = shutil.which("opengame")
-    if og:
-        # opengame is a .cmd shim; its package lives in node_modules/@opengame/opengame
-        shim_dir = os.path.dirname(os.path.realpath(og))
-        candidates.append(
-            os.path.join(shim_dir, "node_modules", "@opengame", "opengame", "dist", "cli.js")
-        )
-    for c in candidates:
-        if c and os.path.isfile(c):
-            return c
+def _opengame_cli_js(repo_root: Path | None = None) -> str | None:
+    """Resolve only the pinned CLI or an explicit controlled-test override."""
+    override = os.environ.get("OPENGAME_CLI_JS")
+    if override and Path(override).is_file():
+        return str(Path(override))
+
+    root = repo_root or Path(__file__).resolve().parents[2]
+    pinned = root / "vendor" / "opengame" / "dist" / "cli.js"
+    if pinned.is_file():
+        return str(pinned)
     return None
+
+
+def test_cli_resolver_prefers_repository_pinned_cli(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("OPENGAME_CLI_JS", raising=False)
+    cli = tmp_path / "vendor" / "opengame" / "dist" / "cli.js"
+    cli.parent.mkdir(parents=True)
+    cli.write_text("// pinned test cli")
+
+    assert _opengame_cli_js(tmp_path) == str(cli)
+
+
+def test_cli_resolver_allows_explicit_override(tmp_path, monkeypatch) -> None:
+    override = tmp_path / "custom-cli.js"
+    override.write_text("// override")
+    monkeypatch.setenv("OPENGAME_CLI_JS", str(override))
+
+    assert _opengame_cli_js(tmp_path / "missing-repo") == str(override)
 
 
 def run_async(coro):

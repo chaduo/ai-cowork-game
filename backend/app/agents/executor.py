@@ -20,6 +20,7 @@ Contract source of truth:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Awaitable, Callable
 from typing import Literal, Protocol
 
 # C09 distinguishes process termination cause. C10 maps these onto GameBuildStatus:
@@ -30,6 +31,16 @@ from typing import Literal, Protocol
 # timed_out vs cancelled cannot be read from the process stream — the executor
 # knows which trigger fired (deadline reached vs an explicit cancel() call).
 ProcessStatus = Literal["completed", "timed_out", "cancelled"]
+AsyncLineCallback = Callable[[str], Awaitable[None]]
+
+
+class ExecutorBusyError(RuntimeError):
+    """Raised when one executor instance is asked to own two active runs."""
+
+
+class OutputLineTooLongError(RuntimeError):
+    """Raised when callback framing exceeds the configured memory bound."""
+
 
 # Soft cap on captured stdout/stderr to bound memory. Anything beyond is truncated
 # and flagged via ``ProcessResult.output_truncated`` so the adapter can surface a
@@ -66,6 +77,8 @@ class ProcessExecutor(Protocol):
         cwd: str,
         approved_env: dict[str, str],
         timeout: float | None,
+        on_stdout_line: AsyncLineCallback | None = None,
+        on_stderr_line: AsyncLineCallback | None = None,
     ) -> ProcessResult:
         """Run ``command arguments`` in ``cwd`` with only ``approved_env``.
 
@@ -75,6 +88,10 @@ class ProcessExecutor(Protocol):
         found); the parent's other environment variables are NOT inherited. If
         ``timeout`` elapses, the whole process tree is killed and ``process_status``
         is ``timed_out``.
+
+        Callback lines share the executor's output byte limit. A provider line
+        that exceeds it is rejected with ``OutputLineTooLongError`` rather than
+        buffered without bound.
         """
         ...
 
