@@ -19,6 +19,7 @@ import os
 import shutil
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
+from pathlib import Path
 
 from app.agents.opengame_event_mapper import map_stream_to_run_events
 from app.agents.executor import ProcessExecutor, ProcessResult
@@ -27,9 +28,13 @@ from app.agents.opengame_stream_parser import (
     parse_stream_json,
     result_indicates_provider_error,
 )
+from app.agents.workspace import (
+    WorkspaceEscapeError,
+    WorkspaceManager,
+    redact_stream,
+)
 from app.contracts.game_agent import (
     AgentRunHandle,
-    ArtifactManifestEntry,
     ContractError,
     Diagnostic,
     GameBuildRequest,
@@ -50,8 +55,6 @@ SUPPORTED_OPERATIONS = frozenset({"create"})
 # from arbitrary frontend input.
 _CREDENTIAL_ENV = ("OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL")
 
-_PREVIEW_ENTRY = "index.html"
-
 
 class OpenGameAdapter:
     """``GameAgent`` backed by the real OpenGame CLI (via a ProcessExecutor)."""
@@ -66,6 +69,7 @@ class OpenGameAdapter:
         sandbox: bool = False,
         timeout_seconds: float | None = 300,
         opengame_cli_js: str | None = None,
+        workspace_manager: WorkspaceManager | None = None,
     ) -> None:
         self._executor = executor
         self._model = model
@@ -74,6 +78,10 @@ class OpenGameAdapter:
         self._sandbox = sandbox
         self._timeout = timeout_seconds
         self._cli_js = opengame_cli_js or _default_cli_js()
+        # C13: the workspace policy + lifecycle. Defaults to a real manager rooted
+        # at data/workspaces; tests/Fake inject one. The adapter never reads the
+        # parent environment for paths and confines artifact scanning to this.
+        self._workspace = workspace_manager or WorkspaceManager()
         self._runs: dict[str, _Run] = {}
         self._counter = 0
 
@@ -89,7 +97,7 @@ class OpenGameAdapter:
             return handle
 
         run = _Run(handle, request, started_at, self._build_command(request),
-                   self._build_env(), self._timeout, self._executor)
+                   self._build_env(), self._timeout, self._executor, self._workspace)
         self._runs[run_id] = run
         await run.start()
         return handle
@@ -169,7 +177,7 @@ def _default_cli_js() -> str:
 class _Run:
     """In-flight state for one OpenGame run."""
 
-    def __init__(self, handle, request, started_at, command_env, env, timeout, executor):
+    def __init__(self, handle, request, started_at, command_env, env, timeout, executor, workspace):
         self.handle = handle
         self.request = request
         self.started_at = started_at
@@ -177,6 +185,7 @@ class _Run:
         self._env = env
         self._timeout = timeout
         self._executor = executor
+        self._workspace = workspace
         self.finished = asyncio.Event()
         self.process_result: ProcessResult | None = None
         self.run_events: list[RunEvent] = []
@@ -194,6 +203,7 @@ class _Run:
         run._env = {}
         run._timeout = None
         run._executor = None
+        run._workspace = None
         run.finished = asyncio.Event()
         run.finished.set()
         run.process_result = None
@@ -230,12 +240,25 @@ class _Run:
                 stdout="", stderr=str(exc), exit_code=None,
                 process_status="completed", duration_seconds=0.0,
             )
+        # C13: scrub secrets from the raw provider stream BEFORE it reaches the
+        # event mapper or the status/scan decision, so a key echoed in stdout can
+        # never land in a RunEvent, Diagnostic, or audit record. Redaction does
+        # not truncate (the stream-json parser needs the full buffer).
+        pr = self.process_result
+        self.process_result = ProcessResult(
+            stdout=redact_stream(pr.stdout),
+            stderr=redact_stream(pr.stderr),
+            exit_code=pr.exit_code,
+            process_status=pr.process_status,
+            duration_seconds=pr.duration_seconds,
+            output_truncated=pr.output_truncated,
+        )
         self.run_events = map_stream_to_run_events(
             parse_stream_json(self.process_result.stdout),
             run_id=self.handle.run_id,
             started_at=self.started_at,
         )
-        self.result = _build_result(self.process_result, self.run_events, self.request)
+        self.result = _build_result(self.process_result, self.run_events, self.request, self._workspace)
         self.finished.set()
 
     def cancel(self) -> None:
@@ -288,7 +311,12 @@ def _unsupported_event(handle, started_at) -> RunEvent:
     )
 
 
-def _build_result(process: ProcessResult, events: list[RunEvent], request: GameBuildRequest) -> GameBuildResult:
+def _build_result(
+    process: ProcessResult,
+    events: list[RunEvent],
+    request: GameBuildRequest,
+    workspace: WorkspaceManager,
+) -> GameBuildResult:
     """Decide GameBuildStatus WITHOUT trusting log keywords (catalog AC)."""
     # 1. process-level cause (C09): timeout/cancelled are authoritative.
     if process.process_status == "cancelled":
@@ -316,8 +344,18 @@ def _build_result(process: ProcessResult, events: list[RunEvent], request: GameB
     if top_result.is_error:
         return _result("failed", "provider_failed", "OpenGame run reported failure", events, request, process)
 
-    # 6. artifact existence check — success without an artifact is invalid_output (C08)
-    artifacts, preview = _scan_artifacts(request.workspace.root)
+    # 6. artifact existence check — success without an artifact is invalid_output (C08).
+    #    C13: the scan is escape-safe; a generated symlink/traversal pointing at host
+    #    files is rejected and recorded as a sanitized workspace_escape policy error
+    #    (not imported), rather than trusted from log keywords alone.
+    try:
+        artifacts, preview = workspace.scan_preview(
+            Path(request.workspace.root), request.workspace.allowed_paths
+        )
+    except WorkspaceEscapeError as esc:
+        # Preserve the specific escape reason (protected_path / symlink_escape /
+        # traversal / ...) in the error code for audit; the message is sanitized.
+        return _result("invalid_output", esc.code, esc.message, events, request, process)
     if not artifacts:
         return _result("invalid_output", "invalid_output",
                         "OpenGame succeeded but produced no playable artifact",
@@ -346,30 +384,3 @@ def _result(status: GameBuildStatus, code: str, message: str,
         metadata={"backend": "opengame", "operation": request.operation,
                   "duration_seconds": process.duration_seconds},
     )
-
-
-def _scan_artifacts(root: str) -> tuple[list[ArtifactManifestEntry], str | None]:
-    """Find the playable artifact (index.html) under root. Basic path safety only;
-    full sandbox/isolation hardening is C13's responsibility."""
-    if not root or not os.path.isdir(root):
-        return [], None
-    preview_path = os.path.join(root, _PREVIEW_ENTRY)
-    if os.path.isfile(preview_path):
-        size = os.path.getsize(preview_path)
-        return [ArtifactManifestEntry(path=_PREVIEW_ENTRY, kind="preview_entry",
-                                      size_bytes=size)], _PREVIEW_ENTRY
-    # Recurse one level for index.html (opengame may put it in a subfolder).
-    found = []
-    for name in sorted(os.listdir(root)):
-        sub = os.path.join(root, name)
-        if os.path.isdir(sub):
-            candidate = os.path.join(sub, _PREVIEW_ENTRY)
-            if os.path.isfile(candidate):
-                found.append((sub, candidate))
-                break
-    if not found:
-        return [], None
-    sub, candidate = found[0]
-    rel = os.path.relpath(candidate, root).replace("\\", "/")
-    return [ArtifactManifestEntry(path=rel, kind="preview_entry",
-                                  size_bytes=os.path.getsize(candidate))], rel

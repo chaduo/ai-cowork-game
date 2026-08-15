@@ -27,6 +27,7 @@ import pytest
 
 from app.agents.opengame_adapter import _build_result
 from app.agents.executor import ProcessResult
+from app.agents.workspace import WorkspaceManager
 from app.contracts.game_agent import GameBuildRequest, WorkspaceRef
 from app.contracts.gamespec import CreatorGameSpec
 from app.agents.opengame_stream_parser import parse_stream_json
@@ -98,7 +99,7 @@ def test_build_result_maps_c08_fixture_to_status(
         duration_seconds=0.0,
     )
     events = parse_stream_json(process.stdout)
-    result = _build_result(process, [], _request(workspace))
+    result = _build_result(process, [], _request(workspace), WorkspaceManager())
 
     assert result.status == expected
     if expected_code is None:
