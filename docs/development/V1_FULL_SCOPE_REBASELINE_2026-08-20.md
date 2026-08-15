@@ -92,7 +92,7 @@ No new scope starts while the previous day's vertical gate is red.
 **zhang**
 
 - [ ] Complete C13 isolated Candidate Workspace and cancellation cleanup.
-- [ ] Complete C20 Project Git repository/checkpoint primitives and artifact provenance mapping.
+- [x] Complete C20 Project Git repository/checkpoint primitives and artifact provenance mapping. — Done 2026-08-15: `ProjectGitService` (dulwich) init/commit/tag/read primitives + content policy (reject absolute/`..`/symlink/`.git`/protected, secret-scan via `app.redaction`) + `ProvenanceService` (resolve_playable/release + compute_checksum + on-disk commit verification + drift detection). Zero migration, zero `lifecycle.py`/`models.py`/`api/` change (Git is not the business state machine). Real Promote-wiring proof: a test passes a real commit sha into `promote_candidate(git_commit=...)` unchanged. 46 C20 tests pass; offline full 198/0. The line-114 checkpoint wiring (Confirm/Promote/Publish) is a separate slice (depends C13+C14+C16).
 - [ ] Make the real provider produce a Candidate that the platform browser runner can verify.
 
 **Daily Gate**
