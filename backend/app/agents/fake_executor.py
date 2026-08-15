@@ -35,7 +35,11 @@ class FakeProcessExecutor:
              "approved_env": approved_env, "timeout": timeout}
         )
         if self.outcome == "succeeded":
-            stdout = '{"type":"system","subtype":"init"}\n{"type":"result","subtype":"success"}\n'
+            stdout = (
+                '{"type":"system","subtype":"init","session_id":"s1","model":"kimi-k3","cwd":"/ws","tools":[]}\n'
+                '{"type":"result","subtype":"success","session_id":"s1","is_error":false,'
+                '"result":"done","usage":{"input_tokens":100,"output_tokens":5}}\n'
+            )
             if on_stdout_line is not None:
                 for line in stdout.splitlines():
                     await on_stdout_line(line)
