@@ -96,6 +96,11 @@ def parse_stream_json_line(line: str) -> OpenGameEvent | None:
         return _parse_system(obj)
     if type_ == "assistant":
         return _parse_assistant(obj)
+    if type_ == "user":
+        # OpenGame emits tool results as top-level user messages in some
+        # stream-json versions; they use the same message/content shape as an
+        # assistant event and are mapped to provider-neutral tool progress.
+        return _parse_assistant(obj)
     if type_ == "result":
         return _parse_result(obj)
     return OpenGameParseError(raw_line=stripped, message=f"unknown type {type_!r}")

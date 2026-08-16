@@ -28,6 +28,7 @@ is an optional deploy-time flag. This module is the path-guard.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 from dataclasses import dataclass, field
@@ -42,10 +43,7 @@ _PROTECTED_NAMES = frozenset({".git", ".env", ".env.local"})
 
 _PREVIEW_ENTRY = "index.html"
 
-# How deep scan_preview looks for the playable entry: root, then one sub-level
-# (opengame may emit into a subfolder). Anything deeper is rejected — a runaway
-# tree is not a legitimate artifact source.
-_SCAN_MAX_DEPTH = 2
+_MAX_MANIFEST_ENTRIES = 512
 
 
 class WorkspaceEscapeError(Exception):
@@ -125,6 +123,8 @@ class WorkspaceManager:
         subdirectories of the root (an empty/None list means "root only").
         """
         rel = self._reject_unsafe_shape(rel_path)
+        if Path(abs_root).is_symlink():
+            raise WorkspaceEscapeError("symlink_escape", "workspace root symlink rejected")
         root_real = self._realpath(abs_root)
 
         # Reject any protected name anywhere in the path chain.
@@ -132,15 +132,15 @@ class WorkspaceManager:
             if part in _PROTECTED_NAMES:
                 raise WorkspaceEscapeError("protected_path", f"protected path rejected: {part}")
 
+        # Inspect the lexical path before resolve(); resolving first would turn
+        # an escaping symlink into a generic workspace_escape and lose the
+        # actionable policy reason.
+        self._reject_symlink_components(root_real, rel)
         candidate = (root_real / rel).resolve(strict=False)
         # Confine: candidate must live under root_real. Use a trailing-sep prefix
         # check so a sibling like "run-2" is not mistaken for "run-1".
         if not self._is_within(root_real, candidate):
             raise WorkspaceEscapeError("workspace_escape", "path resolves outside the workspace")
-
-        # Reject symlinks: the resolved target must not be a link, and no
-        # component on the way up to root may be a link pointing outside.
-        self._reject_symlink_escape(root_real, candidate)
 
         if allowed:
             self._require_allowed(rel, allowed)
@@ -160,34 +160,34 @@ class WorkspaceManager:
         escape rejected and recorded, not silently treated as "no artifact").
         Returns an empty manifest only when there is genuinely no entry.
         """
+        if Path(abs_root).is_symlink():
+            raise WorkspaceEscapeError("symlink_escape", "workspace root symlink rejected")
         root_real = self._realpath(abs_root)
         if not root_real.is_dir():
             return [], None
 
-        # Root-level index.html (validate_member rejects a symlinked/escape entry).
-        root_entry = root_real / _PREVIEW_ENTRY
-        if root_entry.is_file():
-            rel = self.validate_member(root_real, _PREVIEW_ENTRY, allowed)
-            return [
-                ArtifactManifestEntry(path=rel, kind="preview_entry", size_bytes=root_entry.stat().st_size)
-            ], rel
-
-        # One sub-level only (dist/, etc.), each validated.
-        try:
-            entries = sorted(root_real.iterdir())
-        except OSError:
-            return [], None
-        for entry in entries:
-            if not entry.is_dir():
+        artifact_paths: list[tuple[Path, str]] = []
+        for path in sorted(root_real.rglob("*"), key=lambda item: item.relative_to(root_real).as_posix()):
+            rel = path.relative_to(root_real).as_posix()
+            # Validate directories too, so protected folders and symlinked
+            # directories cannot hide outside content from the scan.
+            self.validate_member(root_real, rel, allowed)
+            if path.is_dir():
                 continue
-            candidate = entry / _PREVIEW_ENTRY
-            if candidate.is_file():
-                rel = f"{entry.name}/{_PREVIEW_ENTRY}"
-                rel = self.validate_member(root_real, rel, allowed)
-                return [
-                    ArtifactManifestEntry(path=rel, kind="preview_entry", size_bytes=candidate.stat().st_size)
-                ], rel
-        return [], None
+            if not path.is_file():
+                raise WorkspaceEscapeError("invalid_artifact", "non-regular artifact rejected")
+            artifact_paths.append((path, rel))
+            if len(artifact_paths) > _MAX_MANIFEST_ENTRIES:
+                raise WorkspaceEscapeError("artifact_limit", "artifact manifest exceeds the limit")
+
+        preview = next((rel for _, rel in artifact_paths if rel == _PREVIEW_ENTRY), None)
+        if preview is None:
+            preview = next((rel for _, rel in artifact_paths if Path(rel).name == _PREVIEW_ENTRY), None)
+        manifest = [
+            self._manifest_entry(path, rel, kind="preview_entry" if rel == preview else self._artifact_kind(path))
+            for path, rel in artifact_paths
+        ]
+        return manifest, preview
 
     # -- internals -------------------------------------------------------- #
 
@@ -211,24 +211,51 @@ class WorkspaceManager:
         return Path(common) == Path(str(root))
 
     @staticmethod
-    def _reject_symlink_escape(root_real: Path, candidate: Path) -> None:
-        # Walk from root down to candidate; if any component is a symlink whose
-        # target leaves root, reject. A symlink that stays inside is acceptable
-        # for file reads but the spec rejects symlink escapes; to be safe and
-        # deterministic we reject any symlink on the entry path itself.
-        try:
-            rel = candidate.relative_to(root_real)
-        except ValueError:
-            raise WorkspaceEscapeError("workspace_escape", "path resolves outside the workspace")
+    def _reject_symlink_components(root_real: Path, rel: str) -> None:
+        """Reject symlink components before canonical containment is checked."""
         current = root_real
-        for part in rel.parts:
+        for part in Path(rel).parts:
             current = current / part
             if current.is_symlink():
                 target = Path(os.readlink(str(current)))
                 if not target.is_absolute():
-                    target = (current.parent / target).resolve(strict=False)
+                    target = current.parent / target
+                target = Path(os.path.realpath(str(target)))
                 if not WorkspaceManager._is_within(root_real, target):
                     raise WorkspaceEscapeError("symlink_escape", "symlink escapes the workspace")
+                raise WorkspaceEscapeError("symlink_escape", "symlink artifact rejected")
+
+    @staticmethod
+    def _artifact_kind(path: Path) -> str:
+        return {
+            ".html": "document",
+            ".js": "script",
+            ".mjs": "script",
+            ".css": "style",
+            ".json": "data",
+            ".png": "image",
+            ".jpg": "image",
+            ".jpeg": "image",
+            ".webp": "image",
+            ".svg": "image",
+        }.get(path.suffix.lower(), "artifact")
+
+    @staticmethod
+    def _manifest_entry(path: Path, rel: str, *, kind: str) -> ArtifactManifestEntry:
+        before = path.stat()
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        after = path.stat()
+        if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+            raise WorkspaceEscapeError("artifact_changed", "artifact changed during validation")
+        return ArtifactManifestEntry(
+            path=rel,
+            kind=kind,
+            size_bytes=after.st_size,
+            sha256=digest.hexdigest(),
+        )
 
     @staticmethod
     def _reject_unsafe_shape(rel_path: str) -> str:

@@ -141,6 +141,18 @@ def test_scan_preview_finds_subdir_entry(tmp_path: Path) -> None:
     assert entries
 
 
+def test_scan_preview_returns_manifest_for_all_regular_files(tmp_path: Path) -> None:
+    mgr = WorkspaceManager(root_base=tmp_path / "ws")
+    root = mgr.prepare("r", "s").root
+    (root / "index.html").write_text("<html></html>")
+    (root / "game.js").write_text("console.log('game')")
+    entries, preview = mgr.scan_preview(root, ["dist"])
+    paths = {entry.path for entry in entries}
+    assert preview == "index.html"
+    assert paths == {"index.html", "game.js"}
+    assert all(entry.sha256 for entry in entries)
+
+
 def test_scan_preview_rejects_symlink_entry(tmp_path: Path) -> None:
     _require_symlink_privilege(tmp_path)
     mgr = WorkspaceManager(root_base=tmp_path / "ws")

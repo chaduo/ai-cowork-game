@@ -75,3 +75,24 @@ def test_build_result_redacts_secret_in_stdout_before_diagnostics(tmp_path: Path
     # The provider error (zero tokens) maps to failed; the leaked key is gone.
     assert result.status == "failed"
     assert "sk-leaked999" not in (result.error.message if result.error else "")
+
+
+def test_malformed_stream_is_invalid_output_even_with_success_result(tmp_path: Path) -> None:
+    _, request = _gamespec_request(tmp_path / "ws")
+    Path(request.workspace.root).mkdir()
+    Path(request.workspace.root, "index.html").write_text("<html></html>")
+    process = _success_process("broken-json\n" + _success_process().stdout)
+    result = _build_result(process, [], request, WorkspaceManager())
+    assert result.status == "invalid_output"
+    assert result.error is not None
+    assert result.error.code == "invalid_provider_output"
+
+
+def test_success_without_index_preview_is_invalid_artifact(tmp_path: Path) -> None:
+    _, request = _gamespec_request(tmp_path / "ws")
+    Path(request.workspace.root).mkdir()
+    Path(request.workspace.root, "game.js").write_text("console.log('game')")
+    result = _build_result(_success_process(), [], request, WorkspaceManager())
+    assert result.status == "invalid_output"
+    assert result.error is not None
+    assert result.error.code == "invalid_artifact"
