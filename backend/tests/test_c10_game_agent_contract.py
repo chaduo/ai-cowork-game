@@ -8,9 +8,13 @@ dir with an index.html so the adapter's artifact check can succeed.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
+import pytest
+
 from app.agents.fake_executor import FakeProcessExecutor
+from app.agents.executor import ExecutorBusyError, ProcessResult
 from app.agents.opengame_adapter import OpenGameAdapter
 from app.contracts.game_agent import GameBuildRequest, WorkspaceRef
 from app.contracts.gamespec import CreatorGameSpec
@@ -101,5 +105,108 @@ def test_unproven_operations_are_unsupported(tmp_path: Path) -> None:
             assert result.error.code == "unsupported_operation", operation
             # An unsupported run must not have launched the (fake) executor.
             assert adapter._executor.runs == [], operation  # type: ignore[attr-defined]
+
+    asyncio.run(exercise())
+
+
+def test_opengame_prompt_contains_canonical_spec_and_approved_context(tmp_path: Path) -> None:
+    spec = _gamespec()
+    request = GameBuildRequest(
+        project_id="project-1",
+        build_id="build-prompt",
+        operation="create",
+        creator_game_spec=spec,
+        runtime_build_spec=spec.to_runtime_build_spec(),
+        workspace=WorkspaceRef(root=str(tmp_path / "private-workspace"), allowed_paths=["dist"]),
+        request_text="Make the relationship feedback clearer.",
+    )
+    adapter = OpenGameAdapter(FakeProcessExecutor())
+    _, args = adapter._build_command(request)
+    prompt = args[args.index("-p") + 1]
+
+    assert spec.title in prompt
+    assert spec.first_playable.goal in prompt
+    assert "relationship_growth" in prompt
+    assert request.request_text in prompt
+    assert str(request.workspace.root) not in prompt
+
+
+def test_late_cancel_does_not_rewrite_natural_completion(tmp_path: Path) -> None:
+    async def exercise() -> None:
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        (workspace / "index.html").write_text("<html></html>")
+        spec = _gamespec()
+        request = GameBuildRequest(
+            project_id="project-1",
+            build_id="build-late-cancel",
+            operation="create",
+            creator_game_spec=spec,
+            runtime_build_spec=spec.to_runtime_build_spec(),
+            workspace=WorkspaceRef(root=str(workspace)),
+            request_text="build",
+        )
+        adapter = OpenGameAdapter(FakeProcessExecutor())
+        handle = await adapter.start(request)
+        await asyncio.sleep(0)
+        await adapter.cancel(handle)
+        result = await adapter.result(handle)
+        assert result.status == "succeeded"
+
+    asyncio.run(exercise())
+
+
+def test_prestart_cancel_does_not_launch_provider(tmp_path: Path) -> None:
+    async def exercise() -> None:
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        adapter = OpenGameAdapter(FakeProcessExecutor())
+        spec = _gamespec()
+        request = GameBuildRequest(
+            project_id="project-1", build_id="build-prestart-cancel", operation="create",
+            creator_game_spec=spec, runtime_build_spec=spec.to_runtime_build_spec(),
+            workspace=WorkspaceRef(root=str(workspace)), request_text="build",
+        )
+        handle = await adapter.start(request)
+        await adapter.cancel(handle)
+        result = await adapter.result(handle)
+        assert result.status == "cancelled"
+        assert adapter._executor.runs == []  # type: ignore[attr-defined]
+
+    asyncio.run(exercise())
+
+
+def test_second_active_run_is_rejected() -> None:
+    class BlockingExecutor:
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def run(self, **_: object) -> ProcessResult:
+            self.started.set()
+            await self.release.wait()
+            return ProcessResult(
+                stdout='{"type":"result","subtype":"success","is_error":false,"result":"done","usage":{"input_tokens":1,"output_tokens":1}}\n',
+                stderr="", exit_code=0, process_status="completed", duration_seconds=0.01,
+            )
+
+        async def cancel(self) -> None:
+            self.release.set()
+
+    async def exercise() -> None:
+        executor = BlockingExecutor()
+        adapter = OpenGameAdapter(executor)
+        spec = _gamespec()
+        request = GameBuildRequest(
+            project_id="project-1", build_id="build-1", operation="create",
+            creator_game_spec=spec, runtime_build_spec=spec.to_runtime_build_spec(),
+            workspace=WorkspaceRef(root="/tmp/ws"), request_text="build",
+        )
+        first_handle = await adapter.start(request)
+        await executor.started.wait()
+        with pytest.raises(ExecutorBusyError):
+            await adapter.start(request.model_copy(update={"build_id": "build-2"}))
+        executor.release.set()
+        await adapter.result(first_handle)
 
     asyncio.run(exercise())

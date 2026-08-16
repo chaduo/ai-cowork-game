@@ -15,6 +15,7 @@ workspace (a "successful" run with no index.html is ``invalid_output``).
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import shutil
 from collections.abc import AsyncIterator
@@ -22,8 +23,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.agents.opengame_event_mapper import map_stream_to_run_events
-from app.agents.executor import ProcessExecutor, ProcessResult
+from app.agents.executor import ExecutorBusyError, ProcessExecutor, ProcessResult
 from app.agents.opengame_stream_parser import (
+    OpenGameParseError,
     OpenGameResultEvent,
     parse_stream_json,
     result_indicates_provider_error,
@@ -42,6 +44,7 @@ from app.contracts.game_agent import (
     GameBuildStatus,
     RunEvent,
 )
+from app.redaction import redact_text
 
 # Operations the V1 OpenGameAdapter supports. Per the C08 spike capability matrix
 # (docs/development/c08-opengame-spike/README.md) only `create` has accepted real
@@ -84,8 +87,14 @@ class OpenGameAdapter:
         self._workspace = workspace_manager or WorkspaceManager()
         self._runs: dict[str, _Run] = {}
         self._counter = 0
+        self._active_run_id: str | None = None
 
     async def start(self, request: GameBuildRequest) -> AgentRunHandle:
+        if self._active_run_id is not None:
+            active = self._runs.get(self._active_run_id)
+            if active is not None and not active.finished.is_set():
+                raise ExecutorBusyError("OpenGameAdapter already owns an active run")
+            self._active_run_id = None
         self._counter += 1
         run_id = f"opengame-run-{self._counter}"
         handle = AgentRunHandle(run_id=run_id, build_id=request.build_id)
@@ -99,6 +108,7 @@ class OpenGameAdapter:
         run = _Run(handle, request, started_at, self._build_command(request),
                    self._build_env(), self._timeout, self._executor, self._workspace)
         self._runs[run_id] = run
+        self._active_run_id = run_id
         await run.start()
         return handle
 
@@ -120,7 +130,9 @@ class OpenGameAdapter:
 
     async def cancel(self, handle: AgentRunHandle) -> None:
         run = self._require_run(handle)
-        run.cancel()
+        if run.finished.is_set():
+            return
+        run.request_cancel()
         await self._executor.cancel()
 
     # -- helpers ------------------------------------------------------------- #
@@ -133,7 +145,7 @@ class OpenGameAdapter:
 
     def _build_command(self, request: GameBuildRequest) -> tuple[str, list[str]]:
         node = shutil.which("node") or "node"
-        prompt = request.request_text or "build the game"
+        prompt = _build_prompt(request)
         args = [
             self._cli_js,
             "-p", prompt,
@@ -174,6 +186,40 @@ def _default_cli_js() -> str:
     return ""
 
 
+def _build_prompt(request: GameBuildRequest) -> str:
+    """Serialize the confirmed design and approved build context deterministically.
+
+    The provider receives the design contract, not the host workspace path or raw
+    environment. Sorting keys keeps command evidence and retries reproducible.
+    """
+    payload = {
+        "runtime_build_spec": request.runtime_build_spec.model_dump(mode="json"),
+        "first_playable": {
+            "goal": request.creator_game_spec.first_playable.goal,
+            "hypothesis": request.creator_game_spec.first_playable.hypothesis,
+            "validation": request.creator_game_spec.validation,
+        },
+        "approved_context": {
+            "baseline_playable": request.baseline_playable,
+            "affected_scope": request.affected_scope.model_dump(mode="json"),
+            "resource_references": [item.model_dump(mode="json") for item in request.resource_references],
+            "implementation_dependencies": request.implementation_dependencies,
+            "relevant_overrides": [item.model_dump(mode="json") for item in request.relevant_overrides],
+        },
+    }
+    spec_json = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    prompt = (
+        "Build a self-contained playable game from the confirmed design. "
+        "Write the preview entry as index.html inside the supplied workspace. "
+        "Do not access host paths, credentials, or files outside the workspace.\n"
+        f"Creator request: {request.request_text or '(none)'}\n"
+        f"Confirmed design (JSON): {spec_json}"
+    )
+    # Redact credential-shaped values supplied through user-controlled context,
+    # while retaining the complete prompt for the provider.
+    return redact_text(prompt, max_length=len(prompt))
+
+
 class _Run:
     """In-flight state for one OpenGame run."""
 
@@ -189,7 +235,9 @@ class _Run:
         self.finished = asyncio.Event()
         self.process_result: ProcessResult | None = None
         self.run_events: list[RunEvent] = []
-        self.cancelled = False
+        self.cancel_requested = False
+        self.cancel_before_executor_started = False
+        self.executor_started = False
         self.result: GameBuildResult = self._pending_result()
         self._task: asyncio.Task | None = None
 
@@ -208,7 +256,9 @@ class _Run:
         run.finished.set()
         run.process_result = None
         run.run_events = [_unsupported_event(handle, started_at)]
-        run.cancelled = False
+        run.cancel_requested = False
+        run.cancel_before_executor_started = False
+        run.executor_started = False
         run._task = None
         run.result = GameBuildResult(
             status="unsupported",
@@ -227,6 +277,16 @@ class _Run:
 
     async def _run(self) -> None:
         assert self._executor is not None
+        if self.cancel_requested and self.cancel_before_executor_started:
+            self.process_result = ProcessResult(
+                stdout="", stderr="", exit_code=None,
+                process_status="cancelled", duration_seconds=0.0,
+            )
+            self.run_events = []
+            self.result = _build_result(self.process_result, self.run_events, self.request, self._workspace)
+            self.finished.set()
+            return
+        self.executor_started = True
         try:
             self.process_result = await self._executor.run(
                 command=self._command,
@@ -261,20 +321,38 @@ class _Run:
         self.result = _build_result(self.process_result, self.run_events, self.request, self._workspace)
         self.finished.set()
 
-    def cancel(self) -> None:
-        # Mark this run cancelled; result() applies it after the run task settles.
-        # The executor's cancel() drives the tree-kill for a real subprocess.
-        self.cancelled = True
+    def request_cancel(self) -> None:
+        # A pre-start cancellation must win even for a deterministic fake
+        # executor that returns a completed result. Once the executor has
+        # started, its authoritative process status decides whether cancellation
+        # won a race with natural completion.
+        self.cancel_requested = True
+        if not self.executor_started:
+            self.cancel_before_executor_started = True
 
     async def wait_for_completion(self) -> None:
         if self._task is not None:
             await self._task
         await self.finished.wait()
-        if self.cancelled:
+        process_status = self.process_result.process_status if self.process_result else None
+        if self.cancel_requested and (
+            self.cancel_before_executor_started or process_status != "completed"
+        ):
             self._apply_cancelled()
 
     def _apply_cancelled(self) -> None:
         """Override result/events for a cancelled run (platform-driven cancel)."""
+        if self.result.status == "cancelled":
+            if self.run_events and self.run_events[-1].kind == "cancelled":
+                return
+            err = self.result.error or ContractError(code="cancelled", message="Build cancelled")
+            seq = (self.run_events[-1].sequence if self.run_events else 0) + 1
+            self.run_events.append(RunEvent(
+                run_id=self.handle.run_id, sequence=seq, stage="terminal", kind="cancelled",
+                message="build cancelled", progress=1.0, timestamp=datetime.now(timezone.utc),
+                error=err,
+            ))
+            return
         err = ContractError(code="cancelled", message="Build cancelled")
         # Ensure a cancelled terminal event exists as the last event.
         seq = (self.run_events[-1].sequence if self.run_events else 0) + 1
@@ -324,27 +402,37 @@ def _build_result(
     if process.process_status == "timed_out":
         return _result("timed_out", "timeout", "Build timed out", events, request, process)
 
-    # 2. parse the top-level result event (its is_error is unreliable — C08).
-    result_events = [e for e in parse_stream_json(process.stdout) if isinstance(e, OpenGameResultEvent)]
+    # 2. Parse the stream. A malformed line is provider output corruption, even
+    # if a later line happens to contain a success result.
+    parsed_events = parse_stream_json(process.stdout)
+    if any(isinstance(event, OpenGameParseError) for event in parsed_events):
+        return _result("invalid_output", "invalid_provider_output",
+                       "OpenGame produced malformed stream output", events, request, process)
+
+    # 3. Parse the top-level result event (its is_error is unreliable — C08).
+    result_events = [e for e in parsed_events if isinstance(e, OpenGameResultEvent)]
     top_result = result_events[-1] if result_events else None
+
+    if top_result is not None and top_result.subtype == "cancelled":
+        return _result("cancelled", "cancelled", "Build cancelled", events, request, process)
 
     if top_result is not None and result_indicates_provider_error(top_result):
         return _result("failed", "provider_failed", "OpenGame provider error", events, request, process)
 
-    # 3. exit code
+    # 4. exit code
     if process.exit_code not in (None, 0):
         return _result("failed", "provider_failed",
                         f"OpenGame exited with code {process.exit_code}", events, request, process)
 
-    # 4. no terminal result event → interrupted stream → failed (not succeeded)
+    # 5. no terminal result event → interrupted stream → failed (not succeeded)
     if top_result is None:
         return _result("failed", "provider_failed", "OpenGame run produced no result", events, request, process)
 
-    # 5. top-level is_error true → failed
+    # 6. top-level is_error true → failed
     if top_result.is_error:
         return _result("failed", "provider_failed", "OpenGame run reported failure", events, request, process)
 
-    # 6. artifact existence check — success without an artifact is invalid_output (C08).
+    # 7. artifact existence check — success without an artifact is invalid_output (C08).
     #    C13: the scan is escape-safe; a generated symlink/traversal pointing at host
     #    files is rejected and recorded as a sanitized workspace_escape policy error
     #    (not imported), rather than trusted from log keywords alone.
@@ -360,8 +448,12 @@ def _build_result(
         return _result("invalid_output", "invalid_output",
                         "OpenGame succeeded but produced no playable artifact",
                         events, request, process)
+    if preview is None:
+        return _result("invalid_output", "invalid_artifact",
+                       "OpenGame produced artifacts without index.html",
+                       events, request, process)
 
-    # 7. success
+    # 8. success
     return GameBuildResult(
         status="succeeded",
         artifact_manifest=artifacts,
