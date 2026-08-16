@@ -1,5 +1,4 @@
 import json
-import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -8,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.contracts.game_agent import ContractError, PendingDecision, RunEvent
 from app.models import Run, RunEventRecord, RunPendingDecision, new_id, utc_now
+from app.redaction import REDACTION_PATTERNS, redact_text
 
 
 RUN_TERMINAL_STATUSES = frozenset({
@@ -22,18 +22,11 @@ RUN_TERMINAL_STATUSES = frozenset({
 RUN_EXECUTION_STATUSES = frozenset({"running", "cancelling"})
 RUN_ACTIVE_STATUSES = frozenset({*RUN_EXECUTION_STATUSES, "waiting_for_input"})
 
-_REDACTION_PATTERNS = (
-    (re.compile(r"(?i)\bBearer\s+[^\s,;]+"), "Bearer [REDACTED]"),
-    (re.compile(r"(?i)\b(?:api[_-]?key|token|secret|password)\s*[:=]\s*[^\s,;]+"), "token=[REDACTED]"),
-    (re.compile(r"\bsk-[A-Za-z0-9_-]+\b"), "[REDACTED]"),
-)
+_REDACTION_PATTERNS = REDACTION_PATTERNS  # re-exported for any legacy importers; single truth source is app.redaction
 
 
 def sanitize_text(value: str, *, max_length: int = 4000) -> str:
-    sanitized = value
-    for pattern, replacement in _REDACTION_PATTERNS:
-        sanitized = pattern.sub(replacement, sanitized)
-    return sanitized[:max_length]
+    return redact_text(value, max_length=max_length)
 
 
 def _utc(value: datetime) -> datetime:
