@@ -1,13 +1,16 @@
 from datetime import datetime
+from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Request, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.errors import ApiError
-from app.models import BuildCandidate, HumanPlayReview, PlayableVersion, Project
+from app.agents.workspace import WorkspaceEscapeError, WorkspaceManager
+from app.models import Build, BuildCandidate, HumanPlayReview, PlayableVersion, Project, Run
 from app.services.lifecycle import ProjectLifecycleService
 
 
@@ -62,6 +65,50 @@ class RestoreCandidateResponse(BaseModel):
 
 def _session(request: Request) -> Session:
     return Session(request.app.state.engine)
+
+
+@router.get("/projects/{project_id}/playable-versions/{version_id}/preview")
+def preview_playable_version(project_id: str, version_id: str, request: Request) -> FileResponse:
+    with _session(request) as session:
+        version = session.get(PlayableVersion, version_id)
+        if version is None or version.project_id != project_id:
+            raise ApiError("playable_version_not_found", "Playable Version not found", [], 404)
+
+        candidate = session.get(BuildCandidate, version.candidate_id)
+        build = session.get(Build, candidate.build_id) if candidate else None
+        run = session.scalar(
+            select(Run).where(Run.build_id == build.id).order_by(Run.created_at.desc())
+        ) if build else None
+        if (
+            candidate is None
+            or candidate.status != "promoted"
+            or run is None
+            or not run.workspace_path
+        ):
+            raise ApiError("preview_not_found", "Playable preview is not available", [], 404)
+
+        root = Path(run.workspace_path)
+        try:
+            relative_path = WorkspaceManager().validate_member(root, version.artifact_path)
+        except WorkspaceEscapeError as cause:
+            raise ApiError(
+                "preview_path_rejected",
+                "Playable preview path is not allowed",
+                [{"code": cause.code}],
+                409,
+            ) from cause
+
+        if Path(relative_path).name != "index.html":
+            raise ApiError("preview_not_found", "Playable preview is not available", [], 404)
+
+        artifact = (root.resolve() / relative_path).resolve()
+        if not artifact.is_file():
+            raise ApiError("preview_not_found", "Playable preview is not available", [], 404)
+        return FileResponse(
+            artifact,
+            media_type="text/html",
+            headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+        )
 
 
 def _candidate(session: Session, candidate_id: str) -> BuildCandidate:
