@@ -4,8 +4,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0012_c14_playable_promotion"
-down_revision = "0011_c13_workspace"
+revision = "0014_c14_playable_promotion"
+down_revision = "0013_opengame_resume"
 branch_labels = None
 depends_on = None
 

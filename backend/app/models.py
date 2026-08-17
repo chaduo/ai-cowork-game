@@ -58,6 +58,8 @@ class GameDesignRevision(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # C20 line-114: immutable git checkpoint sha recorded by CheckpointService.confirm_gdd.
+    git_commit: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
@@ -76,6 +78,8 @@ class GameSpecRevision(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # C20 line-114: immutable git checkpoint sha recorded by CheckpointService.confirm_gamespec.
+    git_commit: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
@@ -151,6 +155,12 @@ class Run(Base):
     # did not reuse a prior partial workspace.
     workspace_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     workspace_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # line-115: the OpenGame provider session id, captured from the run's first
+    # `system` event. Lets ContinuationService resume the paused session
+    # (`opengame --resume <id>`) when its blocking decision is resolved. NULL for
+    # pre-line-115 / Fake / test runs; a waiting run with no session id cannot be
+    # resumed and the continuation path surfaces that as a structured failure.
+    opengame_session_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
@@ -296,4 +306,7 @@ class Release(Base):
     playable_version_id: Mapped[str] = mapped_column(ForeignKey("playable_versions.id"), nullable=False)
     number: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="published")
+    # C20 line-114: publish-time git checkpoint snapshot (CheckpointService.publish) so a
+    # Release resolves to an immutable commit, not only transitively via PlayableVersion.
+    git_commit: Mapped[str | None] = mapped_column(String(128), nullable=True)
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)

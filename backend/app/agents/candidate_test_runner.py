@@ -4,7 +4,12 @@ from app.contracts.test_report import RuntimeTestResult
 from app.models import BuildCandidate
 
 
-REQUIRED_EVIDENCE = (
+# The platform-mandated evidence kinds a CandidateTestRunner must produce, in the
+# C12 contract groups. Shared between the deterministic FakeCandidateTestRunner
+# (offline tests) and the real BrowserCandidateTestRunner (Playwright) so both
+# runners emit the same required surface — the platform verdict in
+# CandidateTestService._platform_verdict requires exactly these kinds, each once.
+REQUIRED_EVIDENCE: tuple[str, ...] = (
     "browser_started",
     "console",
     "core_input",
@@ -13,7 +18,7 @@ REQUIRED_EVIDENCE = (
     "phaser_hook",
 )
 
-EVIDENCE_GROUPS = {
+EVIDENCE_GROUPS: dict[str, str] = {
     "browser_started": "browser_smoke",
     "console": "browser_smoke",
     "core_input": "core_gameplay",

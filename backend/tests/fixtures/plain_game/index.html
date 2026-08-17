@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Plain Game (no test hook)</title>
+</head>
+<body>
+  <!--
+    A minimal real, playable game WITHOUT the V1 Test Hook
+    (window.__GAME_TEST__). This mirrors what a real OpenGame build produces:
+    a plain browser game with no instrumented test bridge.
+
+    The platform BrowserCandidateTestRunner must NOT screenshot-guess whether
+    this game "works" — with no hook it returns phaser_hook failed and the
+    core_gameplay checks missing, so CandidateTestService returns
+    CRITICAL_FAILURE (Product Spec §22 / design.md:57: no hook = no gameplay
+    proof, runtime cannot self-certify). This fixture is the deterministic
+    stand-in for a real OpenGame provider's output when the real build is flaky.
+  -->
+  <canvas id="game" width="100" height="100"></canvas>
+  <script>
+    (function () {
+      var canvas = document.getElementById("game");
+      var ctx = canvas.getContext("2d");
+      var score = 0;
+      function render() {
+        ctx.fillStyle = "#222";
+        ctx.fillRect(0, 0, 100, 100);
+        ctx.fillStyle = "#fff";
+        ctx.font = "12px monospace";
+        ctx.fillText("score " + score, 8, 20);
+      }
+      function step() { score += 1; render(); }
+      render();
+      // A real game loop, but NO window.__GAME_TEST__ bridge.
+      setInterval(step, 1000);
+    })();
+  </script>
+</body>
+</html>

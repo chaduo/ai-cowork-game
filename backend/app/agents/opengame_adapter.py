@@ -27,6 +27,7 @@ from app.agents.executor import ExecutorBusyError, ProcessExecutor, ProcessResul
 from app.agents.opengame_stream_parser import (
     OpenGameParseError,
     OpenGameResultEvent,
+    OpenGameSystemEvent,
     parse_stream_json,
     result_indicates_provider_error,
 )
@@ -46,11 +47,15 @@ from app.contracts.game_agent import (
 )
 from app.redaction import redact_text
 
-# Operations the V1 OpenGameAdapter supports. Per the C08 spike capability matrix
-# (docs/development/c08-opengame-spike/README.md) only `create` has accepted real
-# evidence; modify/repair/test would mean guessing provider behavior, so they MUST
-# return the provider-neutral `unsupported` result until new real evidence is
-# captured. See also design.md: "reports unsupported operations explicitly".
+# Operations the V1 OpenGameAdapter supports via the provider-neutral `start`.
+# Per the C08 spike capability matrix only `create` has accepted real evidence;
+# modify/repair/test would mean guessing provider behavior, so they MUST return
+# the provider-neutral `unsupported` result until new real evidence is captured.
+# `resume` is a real OpenGame capability (`--resume <id>`) but it needs the
+# provider-specific session id, so it is NOT a `start(operation=...)` (the neutral
+# GameBuildRequest carries no session id); it is a dedicated `resume_session`
+# method below (line-115), called by ContinuationService after a blocking
+# decision resolves.
 SUPPORTED_OPERATIONS = frozenset({"create"})
 
 # Credentials passed through to the child as the approved env allowlist. The
@@ -121,6 +126,48 @@ class OpenGameAdapter:
         await run.start()
         return handle
 
+    async def resume_session(
+        self,
+        handle: AgentRunHandle,
+        *,
+        session_id: str,
+        decision_text: str,
+        workspace_root: str,
+        request: GameBuildRequest,
+    ) -> AgentRunHandle:
+        """Resume the OpenGame provider's paused session with a resolved decision.
+
+        Drives ``opengame --resume <session_id> -p "<decision>" --yolo
+        --auth-type openai -m <model> -o stream-json`` against the SAME run's
+        workspace (a waiting run is paused, not cancelled — its working tree is
+        reused, NOT a fresh/discard workspace). The resolved blocking decision is
+        passed as the ``-p`` prompt (the OpenGame session's existing context
+        resumes; the decision is the new input). Returns the SAME handle so the
+        caller's stream_events/result continue to reference this run.
+
+        This is the line-115 continuation path: ContinuationService calls it after
+        RunRepository.continue_run resolves the blocking decision. It is OpenGame-
+        specific (the session id is provider-specific), so it is a dedicated method,
+        not a `start(operation="resume")` (the neutral GameBuildRequest carries no
+        session id).
+        """
+        run = self._require_run(handle)
+        command, args = self._build_resume_command(session_id, decision_text)
+        # Reuse the same _Run: override the workspace root so the resumed run
+        # executes in the SAME workspace (a waiting run is paused, not cancelled),
+        # replace its command/env, reset terminal state, and re-drive the executor.
+        run.request = request.model_copy(update={
+            "workspace": request.workspace.model_copy(update={"root": workspace_root}),
+        })
+        run._command, run._args = command, args
+        run._env = self._build_env()
+        run.finished = asyncio.Event()
+        run.process_result = None
+        run.run_events = []
+        run.result = run._pending_result()
+        run._task = asyncio.ensure_future(run._run())
+        return handle
+
     def stream_events(self, handle: AgentRunHandle, after_sequence: int = 0) -> AsyncIterator[RunEvent]:
         run = self._require_run(handle)
 
@@ -135,6 +182,14 @@ class OpenGameAdapter:
     async def result(self, handle: AgentRunHandle) -> GameBuildResult:
         run = self._require_run(handle)
         await run.wait_for_completion()
+        # line-115: surface the captured OpenGame session id on the result metadata
+        # so the platform can persist it (Run.opengame_session_id) and later resume
+        # the paused session after a blocking decision resolves. metadata is a free
+        # dict already in the contract; this is non-destructive (model_copy).
+        if run.opengame_session_id and run.result.status == "waiting_for_input":
+            run.result = run.result.model_copy(update={
+                "metadata": {**run.result.metadata, "opengame_session_id": run.opengame_session_id},
+            })
         return run.result
 
     async def cancel(self, handle: AgentRunHandle) -> None:
@@ -165,6 +220,26 @@ class OpenGameAdapter:
         if not self._sandbox:
             # GEMINI_SANDBOX=false in env handles this; no flag needed.
             pass
+        return node, args
+
+    def _build_resume_command(self, session_id: str, decision_text: str) -> tuple[str, list[str]]:
+        """Build the `opengame --resume <id> -p <decision>` command (line-115).
+
+        The resolved blocking decision is the `-p` prompt (the session's existing
+        context resumes; the decision is the new input). `--resume <id>` resumes
+        the paused OpenGame session; `--yolo` auto-approves; `-o stream-json` keeps
+        the normalized-event contract. No stdin — `-p` carries the decision.
+        """
+        node = shutil.which("node") or "node"
+        prompt = redact_text(decision_text, max_length=len(decision_text))
+        args = [
+            self._cli_js,
+            "--resume", session_id,
+            "-p", prompt,
+            "--yolo", "--auth-type", "openai",
+            "-m", self._model,
+            "-o", "stream-json",
+        ]
         return node, args
 
     def _build_env(self) -> dict[str, str]:
@@ -255,6 +330,10 @@ class _Run:
         self.finished = asyncio.Event()
         self.process_result: ProcessResult | None = None
         self.run_events: list[RunEvent] = []
+        # line-115: the OpenGame session id, captured from the first `system`
+        # event so a later resume (`opengame --resume <id>`) can re-drive this
+        # session after a blocking decision resolves. None until the run starts.
+        self.opengame_session_id: str | None = None
         self.cancel_requested = False
         self.cancel_before_executor_started = False
         self.executor_started = False
@@ -276,6 +355,7 @@ class _Run:
         run.finished.set()
         run.process_result = None
         run.run_events = [_unsupported_event(handle, started_at)]
+        run.opengame_session_id = None
         run.cancel_requested = False
         run.cancel_before_executor_started = False
         run.executor_started = False
@@ -362,6 +442,13 @@ class _Run:
             run_id=self.handle.run_id,
             started_at=self.started_at,
         )
+        # line-115: capture the OpenGame session id from the first system event so
+        # a later resume can re-drive this session after a blocking decision.
+        if self.opengame_session_id is None:
+            for event in parse_stream_json(self.process_result.stdout):
+                if isinstance(event, OpenGameSystemEvent) and event.session_id:
+                    self.opengame_session_id = event.session_id
+                    break
         self.result = _build_result(self.process_result, self.run_events, self.request, self._workspace)
         self.finished.set()
 
