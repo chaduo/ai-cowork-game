@@ -93,7 +93,7 @@ No new scope starts while the previous day's vertical gate is red.
 
 - [ ] Complete C13 isolated Candidate Workspace and cancellation cleanup.
 - [ ] Complete C20 Project Git repository/checkpoint primitives and artifact provenance mapping.
-- [ ] Make the real provider produce a Candidate that the platform browser runner can verify.
+- [x] Make the real provider produce a Candidate that the platform browser runner can verify. — Done 2026-08-17: `BrowserCandidateTestRunner` (`backend/app/agents/browser_test_runner.py`, Playwright headless Chromium) implements the `CandidateTestRunner` protocol and collects the 6 `REQUIRED_EVIDENCE` kinds (browser_started/console/core_input/gameplay/completion/phaser_hook), probing the read-only `window.__GAME_TEST__` bridge — never screenshot-guessing. Through `CandidateTestService` (unchanged, runner injected) it produces a real platform TestReport: an instrumented game with the hook → `PASSED` + `ready`; a real-provider-style plain game without the hook → `phaser_hook` failed + core_gameplay `missing` → `CRITICAL_FAILURE` (spec-correct: no hook = no gameplay proof). `REQUIRED_EVIDENCE`/`EVIDENCE_GROUPS` factored to the shared `candidate_test_runner.py` so Fake and Browser runners agree. Playwright is a lazy import + `playwright install chromium` (one-time). Deterministic scenarios 1+2 pass (no token); scenario 3 (real OpenGameAdapter, gated on creds+opengame) is skip-safe when the real build is flaky. Production default-runner wiring (switch CandidateTestService off Fake) is a separate cross-owner slice.
 
 **Daily Gate**
 
