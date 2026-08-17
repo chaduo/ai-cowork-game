@@ -9,6 +9,7 @@ export type BuildPhase =
   | 'auto_fixing'
   | 'validating_complete'
   | 'playable_ready'
+  | 'candidate_ready'
   | 'build_error'
 
 export type BuildMilestoneId = 'foundation' | 'core' | 'interaction' | 'presentation' | 'progression' | 'validation'

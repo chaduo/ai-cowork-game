@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowLeft, ArrowRight, Check, ChevronRight, FileCode2, Gamepad2, Hammer, Image, LoaderCircle, MonitorPlay, ScrollText, SlidersHorizontal } from 'lucide-vue-next'
+import { ArrowLeft, ArrowRight, Check, ChevronRight, CircleX, FileCode2, Gamepad2, Hammer, Image, LoaderCircle, MonitorPlay, ScrollText, SlidersHorizontal } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AssetGalleryReadOnly from '../components/workspace/AssetGalleryReadOnly.vue'
 import ArtifactEmptyState from '../components/workspace/ArtifactEmptyState.vue'
@@ -29,11 +29,18 @@ import {
   applySpecRevision,
   cancelChange as cancelProjectChange,
   confirmSpecAndStartBuild,
+  cancelBuild,
+  cancelRemoteBuild,
   getActiveProject,
   requestChange as requestProjectChange,
   requestSpecConfirmation,
   requestSpecRevision,
   retryBuild,
+  startRemoteBuild,
+  refreshRemoteBuild,
+  refreshRemoteCandidateTest,
+  rebuildRemoteCandidate,
+  testRemoteCandidate,
   retryScopeViolation as retryProjectScopeViolation,
   cancelRelationshipResource as cancelProjectRelationshipResource,
   dismissResourceRecommendation,
@@ -60,7 +67,7 @@ const emit = defineEmits<{ back: []; resources: []; reviewResources: [release: R
 const session = getActiveProject()!
 const phase = computed(() => session.phase)
 const previewPhases: string[] = ['playable_ready', 'showing_recommendations', 'playing_v1', 'playable_v2_ready', 'version_history']
-const activeTab = ref<ArtifactTab>(session.phase.includes('build') ? 'build' : previewPhases.includes(session.phase) || session.phase.includes('change') ? 'preview' : 'gamespec')
+const activeTab = ref<ArtifactTab>(session.phase.includes('build') || session.phase === 'candidate_ready' ? 'build' : previewPhases.includes(session.phase) || session.phase.includes('change') ? 'preview' : 'gamespec')
 const selectedContext = ref<SpecContext | null>(null)
 const spec = session.spec
 const reuseDrawerOpen = ref(false)
@@ -124,6 +131,7 @@ const buildPhases: BuildPhase[] = [
   'build_starting', 'building_foundation', 'building_core', 'building_interaction',
   'building_presentation', 'building_progression', 'validating', 'auto_fixing',
   'validating_complete', 'playable_ready', 'build_error',
+  'candidate_ready',
 ]
 
 const changePhases: ChangePhase[] = [
@@ -133,8 +141,9 @@ const changePhases: ChangePhase[] = [
   'validation_complete_change', 'playable_v2_ready', 'version_history',
 ]
 
-const isBuildMode = computed(() => phase.value === 'spec_confirmed' || buildPhases.includes(phase.value as BuildPhase))
-const isBuildTimelineMode = computed(() => buildPhases.includes(phase.value as BuildPhase))
+const isBuildMode = computed(() => phase.value === 'spec_confirmed' || buildPhases.includes(phase.value as BuildPhase) || phase.value === 'candidate_ready')
+const isBuildTimelineMode = computed(() => buildPhases.includes(phase.value as BuildPhase) && phase.value !== 'candidate_ready')
+const isBuildPanelMode = computed(() => isBuildTimelineMode.value || phase.value === 'candidate_ready')
 const isChangeMode = computed(() => changePhases.includes(phase.value as ChangePhase))
 const tabs = computed(() => isChangeMode.value ? changeTabs : isBuildMode.value ? buildTabs : specTabs)
 const emptyArtifactTab = computed<Exclude<ArtifactTab, 'gamespec' | 'build' | 'change'>>(() => {
@@ -148,8 +157,24 @@ const generationSteps = computed(() => [
   { label: 'Preparing validation criteria', state: phase.value === 'review' ? 'done' : 'upcoming' },
 ])
 
+const evidenceLabels: Record<string, string> = {
+  build_check: '构建产物',
+  browser_started: '浏览器启动',
+  console: '控制台错误',
+  core_input: '核心输入',
+  gameplay: '核心玩法',
+  completion: '完成条件',
+  phaser_hook: '游戏测试接口',
+}
+
+function evidenceObserved(evidence: { observed: string }) {
+  return evidence.observed.includes('outside its run workspace')
+    ? '无法在本次 Run Workspace 中找到 Candidate 产物。'
+    : evidence.observed
+}
+
 watch(phase, (nextPhase) => {
-  if (nextPhase === 'spec_confirmed') activeTab.value = 'build'
+  if (nextPhase === 'spec_confirmed' || nextPhase === 'candidate_ready') activeTab.value = 'build'
   else if (previewPhases.includes(nextPhase) || nextPhase === 'scope_violation') activeTab.value = 'preview'
 })
 
@@ -216,7 +241,8 @@ async function persistGameSpecDraft() {
 async function confirmGameSpec() {
   if (session.designStatus !== 'confirmed') {
     activeTab.value = 'build'
-    confirmSpecAndStartBuild(session.id)
+    if (session.backendProjectId) void startRemoteBuild(session.id)
+    else confirmSpecAndStartBuild(session.id)
     return
   }
   const saved = await persistGameSpecDraft()
@@ -232,7 +258,8 @@ async function confirmGameSpec() {
       spec: response.spec,
     })
     activeTab.value = 'build'
-    confirmSpecAndStartBuild(session.id)
+    if (session.backendProjectId) void startRemoteBuild(session.id)
+    else confirmSpecAndStartBuild(session.id)
   } catch (cause) {
     gamespecError.value = cause instanceof ApiClientError ? cause.message : 'GameSpec 确认失败，请检查后重试。'
     setWorkspacePhase(session.id, 'review')
@@ -240,7 +267,25 @@ async function confirmGameSpec() {
 }
 
 function retryBuildStage() {
-  retryBuild(session.id)
+  if (session.backendProjectId) {
+    session.remoteBuild = null
+    void startRemoteBuild(session.id)
+  } else {
+    retryBuild(session.id)
+  }
+}
+
+function cancelBuildStage() {
+  if (session.backendProjectId) void cancelRemoteBuild(session.id)
+  else cancelBuild(session.id)
+}
+
+function runCandidateTest() {
+  void testRemoteCandidate(session.id)
+}
+
+function rebuildCandidate() {
+  void rebuildRemoteCandidate(session.id)
 }
 
 function requestChange(source: ChangeSource, request?: string) {
@@ -348,6 +393,11 @@ onMounted(async () => {
         })
         if (response.status === 'confirmed') {
           if (getCurrentPlayable(session)) setWorkspacePhase(session.id, 'playable_ready')
+          else if (session.backendProjectId && session.remoteBuild) {
+            await refreshRemoteBuild(session.id)
+            await refreshRemoteCandidateTest(session.id)
+          }
+          else if (session.backendProjectId) void startRemoteBuild(session.id)
           else confirmSpecAndStartBuild(session.id)
         }
       } catch (cause) {
@@ -398,7 +448,7 @@ onBeforeUnmount(() => {
           @continue-playing="setWorkspacePhase(session.id, 'playing_v1')"
           @show-recommendations="setWorkspacePhase(session.id, 'showing_recommendations')"
     />
-    <BuildCoworkPanel v-else-if="isBuildTimelineMode" :phase="phase as BuildPhase" />
+    <BuildCoworkPanel v-else-if="isBuildPanelMode" :phase="phase as BuildPhase" :error-code="session.remoteBuild?.errorCode" :error-message="session.remoteBuild?.errorMessage" />
     <CoworkPanel
       v-else
       :phase="phase"
@@ -435,7 +485,40 @@ onBeforeUnmount(() => {
           <div class="build-start-line"><span>DESIGN</span><ChevronRight :size="13" /><span>GAMESPEC</span><ChevronRight :size="13" /><strong>BUILD</strong></div>
         </section>
 
-        <BuildWorkspaceView v-else-if="activeTab === 'build' && isBuildTimelineMode" :phase="phase as BuildPhase" @retry="retryBuildStage" />
+        <section v-else-if="activeTab === 'build' && phase === 'candidate_ready'" class="candidate-ready-state">
+          <span class="confirmed-icon"><Check :size="26" /></span>
+          <span>BUILD CANDIDATE READY</span>
+          <h2>真实 Build 已生成候选版本</h2>
+          <p>OpenGame 已生成构建产物。它还没有成为 Playable，需要先完成平台验证和人工试玩确认。</p>
+          <dl class="candidate-ready-meta">
+            <div><dt>Candidate</dt><dd>{{ session.remoteBuild?.candidateId }}</dd></div>
+            <div><dt>入口</dt><dd>{{ session.remoteBuild?.artifactPath ?? '已生成，等待验证' }}</dd></div>
+          </dl>
+          <div class="candidate-test-gate" :class="`is-${session.remoteBuild?.testGateStatus ?? 'untested'}`">
+            <div>
+              <strong>{{ session.remoteBuild?.testGateStatus === 'ready' ? '平台验证通过' : session.remoteBuild?.testGateStatus && session.remoteBuild.testGateStatus !== 'untested' ? '平台验证未通过' : '等待平台验证' }}</strong>
+              <p v-if="session.remoteBuild?.testReport">{{ session.remoteBuild.testGateStatus === 'ready' ? '真实浏览器检查与核心玩法证据均已通过。' : '平台验证发现阻塞项，Candidate 尚不能进入人工试玩确认。' }}</p>
+              <p v-else-if="session.remoteBuild?.testGateStatus === 'untested' || !session.remoteBuild?.testGateStatus">将使用真实 Chrome 检查页面启动、控制台、核心输入、玩法和完成条件。</p>
+              <p v-else>正在读取已保存的验证证据。</p>
+            </div>
+            <button v-if="!session.remoteBuild?.testReport" type="button" :disabled="session.remoteBuild?.testRunning || (session.remoteBuild?.testGateStatus !== undefined && session.remoteBuild.testGateStatus !== 'untested')" @click="runCandidateTest">
+              <LoaderCircle v-if="session.remoteBuild?.testRunning" :size="15" class="spin" />
+              <Check v-else :size="15" />
+              {{ session.remoteBuild?.testRunning ? '正在验证' : '运行平台验证' }}
+            </button>
+            <button v-else-if="session.remoteBuild.testGateStatus !== 'ready'" type="button" @click="rebuildCandidate"><Hammer :size="15" />重新构建 Candidate</button>
+          </div>
+          <p v-if="session.remoteBuild?.testError" class="candidate-test-error">{{ session.remoteBuild.testError }}</p>
+          <ul v-if="session.remoteBuild?.testReport" class="candidate-evidence-list" aria-label="平台验证证据">
+            <li v-for="evidence in session.remoteBuild.testReport.evidence" :key="evidence.id" :class="`is-${evidence.status}`">
+              <Check v-if="evidence.status === 'passed'" :size="14" />
+              <CircleX v-else :size="14" />
+              <span><strong>{{ evidenceLabels[evidence.kind] ?? evidence.kind }}</strong><small>{{ evidenceObserved(evidence) }}</small></span>
+            </li>
+          </ul>
+        </section>
+
+        <BuildWorkspaceView v-else-if="activeTab === 'build' && isBuildTimelineMode" :phase="phase as BuildPhase" :error-code="session.remoteBuild?.errorCode" :error-message="session.remoteBuild?.errorMessage" @retry="retryBuildStage" @cancel="cancelBuildStage" />
 
         <section v-else-if="activeTab === 'gamespec' && (phase === 'generating' || phase === 'generation_error')" class="spec-generating">
           <span>GAME SPEC</span>

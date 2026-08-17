@@ -218,14 +218,14 @@ class BuildService:
     def recover_orphaned_jobs(self) -> int:
         runs_recovered = self.runs.recover_orphaned_runs()
         builds_recovered = self.lifecycle.recover_orphaned_builds()
-        # C13: any run that still holds a prepared workspace but is no longer
-        # active (orphaned by a restart, or otherwise lingering) leaves a partial
-        # workspace on disk — discard it so it is never trusted or reused.
+        # A succeeded run owns the Candidate artifact until promotion/import and
+        # must survive process restarts. Only non-success terminal workspaces are
+        # partial and unsafe to retain.
         lingering = self.session.scalars(
             select(Run).where(Run.workspace_status == "prepared")
         )
         for run in lingering:
-            if run.status not in RUN_ACTIVE_STATUSES:
+            if run.status not in RUN_ACTIVE_STATUSES and run.status != "succeeded":
                 self._discard_workspace(run)
         self.session.flush()
         return max(runs_recovered, builds_recovered)
@@ -271,6 +271,25 @@ class BuildService:
             error=result.error,
             timestamp=now,
         )
+        if result.status == "succeeded":
+            artifact_ref = result.preview_entry or (
+                result.artifact_manifest[0].path if result.artifact_manifest else None
+            )
+            if not artifact_ref:
+                raise ValueError("succeeded result requires an artifact")
+            # Provider adapters may emit a generic terminal event. The platform
+            # owns the success contract and must attach the artifact it scanned.
+            terminal = terminal.model_copy(update={
+                "stage": "complete",
+                "kind": "completed",
+                "progress": 1.0,
+                "artifact_ref": artifact_ref,
+                "error": None,
+            })
+        elif terminal.error is None and result.error is not None:
+            # A provider's generic terminal event may omit its cause. Preserve
+            # the platform decision so non-success runs remain auditable.
+            terminal = terminal.model_copy(update={"error": result.error})
         self.runs.finish_run(run.id, result.status, terminal)
         diagnostics_json = json.dumps([item.model_dump(mode="json") for item in result.diagnostics], ensure_ascii=False)
         summary = "Build completed" if result.status == "succeeded" else (result.error.message if result.error else "Build failed")

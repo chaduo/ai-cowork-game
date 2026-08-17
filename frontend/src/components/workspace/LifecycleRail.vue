@@ -11,6 +11,7 @@ const stages = computed(() => {
     'build_starting', 'building_foundation', 'building_core', 'building_interaction',
     'building_presentation', 'building_progression', 'validating', 'auto_fixing',
     'validating_complete', 'build_error', 'playable_ready',
+    'candidate_ready',
   ]
   const buildCurrent = buildPhases.includes(props.phase)
   const changePhases: WorkspacePhase[] = [
@@ -29,7 +30,7 @@ const stages = computed(() => {
   return [
     { id: 'design', label: 'DESIGN', note: 'Confirmed', state: 'done' },
     { id: 'gamespec', label: 'GAMESPEC', note: designComplete ? 'Confirmed' : 'Review', state: designComplete ? 'done' : 'current' },
-    { id: 'build', label: 'BUILD', note: changeWorking ? 'Updating' : playableReady || changeCurrent ? 'Validated' : buildCurrent ? (props.phase === 'build_error' ? 'Attention' : 'In progress') : '', state: changeWorking ? 'current' : playableReady || changeCurrent ? 'verified' : buildCurrent ? 'current' : 'upcoming' },
+    { id: 'build', label: 'BUILD', note: changeWorking ? 'Updating' : playableReady || changeCurrent ? 'Validated' : props.phase === 'candidate_ready' ? 'Candidate ready' : buildCurrent ? (props.phase === 'build_error' ? 'Attention' : 'In progress') : '', state: changeWorking ? 'current' : playableReady || changeCurrent ? 'verified' : buildCurrent ? 'current' : 'upcoming' },
     { id: 'playable', label: 'PLAYABLE', note: props.phase === 'playable_v2_ready' || props.phase === 'version_history' ? 'v2 · Stable' : playableReady || changeCurrent ? 'v1 · Stable' : '', state: changeWorking ? 'verified' : playableReady || changeCurrent ? 'current' : 'upcoming' },
   ]
 })

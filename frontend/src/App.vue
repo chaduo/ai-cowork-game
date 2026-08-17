@@ -6,7 +6,7 @@ import MyResources from './screens/MyResources.vue'
 import ResourceReviewWorkspace from './screens/ResourceReviewWorkspace.vue'
 import type { ConfirmedGameDesign } from './components/kickoff/kickoffTypes'
 import type { ReleaseRecord } from './components/workspace/releaseTypes'
-import { appendPlayableVersion, completeGeneration, configureDemoRuntime, createProject, getActiveProject, getPendingResourceCount, openProject, projectStore, setProjectDesignStatus, startGeneration, updateSavedResourceMetadata } from './stores/projectStore'
+import { appendPlayableVersion, bindBackendProject, completeGeneration, configureDemoRuntime, createProject, getActiveProject, getPendingResourceCount, hydrateRemoteBuild, openProject, projectStore, setProjectDesignStatus, startGeneration, updateSavedResourceMetadata } from './stores/projectStore'
 import { seedDemo, type AppSurface } from './stores/demoSeeds'
 import { getProjectDesign, getProjectRecord, listProjectRecords, type ProjectResponse } from './api/client'
 
@@ -62,7 +62,10 @@ function upsertProjectRecord(record: ProjectResponse): void {
 function hydrateProjectSession(record: ProjectResponse) {
   const existing = projectStore.projects.find((project) => project.id === record.id)
   const session = existing ?? createProject(designFromRecord(record), record.id)
-  if (existing) openProject(record.id)
+  if (existing) {
+    openProject(record.id)
+    bindBackendProject(record.id)
+  }
   // A restored local session already contains the prototype's durable build
   // state. Only new sessions need the initial local generation transition.
   if (!existing) completeGeneration(session.id)
@@ -71,6 +74,28 @@ function hydrateProjectSession(record: ProjectResponse) {
       reason: 'initial',
       name: `${record.name} · Playable v${record.current_playable.number}`,
       summary: '从已保存的 Project 状态恢复。',
+    })
+  }
+  if (!record.current_playable && record.stage === 'candidate_review' && record.candidate_review) {
+    hydrateRemoteBuild(session.id, {
+      buildId: record.candidate_review.build_id,
+      runId: record.candidate_review.run_id,
+      status: 'succeeded',
+      candidateId: record.candidate_review.candidate_id,
+      artifactPath: record.candidate_review.artifact_path,
+      errorCode: null,
+      errorMessage: null,
+      testGateStatus: record.candidate_review.test_gate_status,
+    })
+  } else if (!record.current_playable && record.latest_build) {
+    hydrateRemoteBuild(session.id, {
+      buildId: record.latest_build.build_id,
+      runId: record.latest_build.run_id,
+      status: record.latest_build.status,
+      candidateId: record.latest_build.candidate_id,
+      artifactPath: record.latest_build.artifact_path,
+      errorCode: record.latest_build.error_code,
+      errorMessage: record.latest_build.error_message,
     })
   }
   if (record.latest_release && session.releases.length === 0) {
@@ -146,12 +171,12 @@ async function openWorkspace(projectId: string) {
       // Offline demo/local sessions can still be opened from the in-memory store.
     }
   }
-  if (!openProject(projectId)) {
-    try {
-      const record = await getProjectRecord(projectId)
-      upsertProjectRecord(record)
-      hydrateProjectSession(record)
-    } catch {
+  try {
+    const record = await getProjectRecord(projectId)
+    upsertProjectRecord(record)
+    hydrateProjectSession(record)
+  } catch {
+    if (!openProject(projectId)) {
       projectListError.value = '找不到这个项目，可能已经被移除或暂时不可用。'
       return
     }

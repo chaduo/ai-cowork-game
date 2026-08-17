@@ -38,6 +38,21 @@ def _hook_result(value: object) -> tuple[bool, str]:
     return True, str(value.get("observed") or "test hook passed")
 
 
+def _select_debug_target(targets: list[dict]) -> dict | None:
+    """Prefer a web page target over Chrome's browser UI target."""
+    return (
+        next(
+            (
+                item
+                for item in targets
+                if item.get("type") == "page" and item.get("webSocketDebuggerUrl")
+            ),
+            None,
+        )
+        or next((item for item in targets if item.get("webSocketDebuggerUrl")), None)
+    )
+
+
 class ChromeCandidateTestRunner(CandidateTestRunner):
     def __init__(
         self,
@@ -237,7 +252,7 @@ class _ChromeProcess:
             try:
                 with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/json/list", timeout=0.5) as response:
                     targets = json.loads(response.read().decode("utf-8"))
-                target = next((item for item in targets if item.get("webSocketDebuggerUrl")), None)
+                target = _select_debug_target(targets)
                 if target:
                     return _CdpClient(target["webSocketDebuggerUrl"], self.timeout)
             except (OSError, ValueError):

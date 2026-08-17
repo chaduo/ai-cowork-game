@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.agents.fake_executor import FakeProcessExecutor
 from app.agents.opengame_adapter import OpenGameAdapter, _build_prompt, _default_cli_js
-from app.agents.chrome_browser_runner import ChromeCandidateTestRunner, _hook_result
+from app.agents.chrome_browser_runner import ChromeCandidateTestRunner, _hook_result, _select_debug_target
 from app.config import Settings, get_settings
 from app.contracts.game_agent import GameBuildRequest, WorkspaceRef
 from app.contracts.gamespec import CreatorGameSpec
@@ -89,6 +89,17 @@ def test_hook_result_rejects_runtime_pass_without_platform_shape() -> None:
     assert _hook_result({"passed": True, "observed": "ok"}) == (True, "ok")
 
 
+def test_chrome_target_selection_prefers_page_over_browser_ui() -> None:
+    targets = [
+        {"type": "browser_ui", "webSocketDebuggerUrl": "ws://browser-ui"},
+        {"type": "page", "webSocketDebuggerUrl": "ws://game-page"},
+    ]
+
+    selected = _select_debug_target(targets)
+
+    assert selected is targets[1]
+
+
 @pytest.mark.skipif(
     not (ChromeCandidateTestRunner.find_browser() and os.getenv("RUN_REAL_BROWSER_SMOKE") == "1"),
     reason="set RUN_REAL_BROWSER_SMOKE=1 and install Google Chrome/Chromium for real browser smoke",
@@ -122,7 +133,10 @@ def test_real_chrome_runner_collects_platform_evidence(isolated_database, tmp_pa
 
         result = asyncio.run(ChromeCandidateTestRunner(session, timeout_seconds=8).run(candidate))
 
-    assert result.verdict == "pass"
+    if result.verdict != "pass":
+        diagnostics = [item.model_dump(mode="json") for item in result.diagnostics]
+        evidence = [item.model_dump(mode="json") for item in result.evidence]
+        pytest.fail(json.dumps({"diagnostics": diagnostics, "evidence": evidence}, ensure_ascii=False, indent=2))
     assert {item.kind for item in result.evidence} == {
         "browser_started", "console", "core_input", "gameplay", "completion", "phaser_hook",
     }

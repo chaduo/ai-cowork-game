@@ -1,12 +1,13 @@
 import asyncio
 import json
+from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents.fake_game_agent import FakeGameAgent
-from app.contracts.game_agent import AffectedScope, BuildOverride, ResourceReference
+from app.contracts.game_agent import ArtifactManifestEntry, AffectedScope, BuildOverride, GameBuildResult, ResourceReference, RunEvent
 from app.models import Build, BuildCandidate, BuildContext, Project, Run
 from app.services.builds import BuildService
 from app.services.lifecycle import ProjectLifecycleService
@@ -191,6 +192,73 @@ def test_success_creates_candidate_without_promoting_current_playable(isolated_d
         assert candidate.artifact_path == "dist/index.html"
         assert session.get(Project, project.id).current_playable_version_id is None
         assert session.get(Run, job.run_id).status == "succeeded"
+
+
+def test_success_result_normalizes_provider_terminal_event_with_artifact(isolated_database) -> None:
+    """A provider terminal event is not allowed to hide a successful artifact."""
+    with Session(isolated_database) as session:
+        project = confirmed_project(session)
+        service = BuildService(session, FakeGameAgent())
+        job = service.create_build(project.id)
+        build = session.get(Build, job.build_id)
+        run = session.get(Run, job.run_id)
+        assert build is not None and run is not None
+
+        provider_terminal = RunEvent(
+            run_id=run.id,
+            sequence=1,
+            stage="terminal",
+            kind="terminal",
+            message="build completed",
+            progress=1,
+            timestamp=datetime.now(timezone.utc),
+        )
+        result = GameBuildResult(
+            status="succeeded",
+            artifact_manifest=[ArtifactManifestEntry(path="dist/index.html", kind="html")],
+            preview_entry="dist/index.html",
+        )
+
+        persisted = service._persist_result(build, run, result, provider_terminal)
+        session.commit()
+
+        assert persisted.status == "succeeded"
+        events = service.runs.list_events(run.id)
+        assert events[-1].kind == "completed"
+        assert events[-1].artifact_ref == "dist/index.html"
+
+
+def test_non_success_result_normalizes_provider_terminal_error(isolated_database) -> None:
+    """A generic provider terminal event must not erase the platform error."""
+    with Session(isolated_database) as session:
+        project = confirmed_project(session)
+        service = BuildService(session, FakeGameAgent())
+        job = service.create_build(project.id)
+        build = session.get(Build, job.build_id)
+        run = session.get(Run, job.run_id)
+        assert build is not None and run is not None
+
+        provider_terminal = RunEvent(
+            run_id=run.id,
+            sequence=1,
+            stage="terminal",
+            kind="terminal",
+            message="build completed",
+            progress=1,
+            timestamp=datetime.now(timezone.utc),
+        )
+        result = GameBuildResult(
+            status="invalid_output",
+            error={"code": "invalid_artifact", "message": "index.html is missing"},
+        )
+
+        persisted = service._persist_result(build, run, result, provider_terminal)
+        session.commit()
+
+        assert persisted.status == "invalid_output"
+        events = service.runs.list_events(run.id)
+        assert events[-1].error is not None
+        assert events[-1].error.code == "invalid_artifact"
 
 
 def test_waiting_build_is_persisted_and_duplicate_execution_does_not_start_provider_again(isolated_database) -> None:

@@ -2,11 +2,12 @@
 import { Check, ChevronDown, FileCode2, Link2, LoaderCircle, RotateCcw, TriangleAlert } from 'lucide-vue-next'
 import type { BuildMilestone, BuildPhase, MilestoneStatus } from './buildTypes'
 
-defineProps<{
+withDefaults(defineProps<{
   milestone: BuildMilestone
   status: MilestoneStatus
   phase: BuildPhase
-}>()
+  errorMessage?: string | null
+}>(), { errorMessage: null })
 
 defineEmits<{ retry: [] }>()
 </script>
@@ -30,8 +31,8 @@ defineEmits<{ retry: [] }>()
     <div v-if="phase === 'build_error'" class="build-error-callout">
       <TriangleAlert :size="18" />
       <div>
-        <strong>角色素材没有生成完成</strong>
-        <p>Foundation、Core Gameplay 和 NPC 逻辑已经保留。只需要重新尝试 Presentation。</p>
+        <strong>Build 没有完成</strong>
+        <p>{{ errorMessage ?? '已完成的内容保持不变，可以重试构建。' }}</p>
       </div>
       <button type="button" @click="$emit('retry')"><RotateCcw :size="14" />重新尝试此阶段</button>
     </div>
