@@ -305,6 +305,10 @@ export function playablePreviewUrl(projectId: string, versionId: string): string
   return `/api/v1/projects/${encodeURIComponent(projectId)}/playable-versions/${encodeURIComponent(versionId)}/preview`
 }
 
+export function candidatePreviewUrl(projectId: string, candidateId: string): string {
+  return `/api/v1/projects/${encodeURIComponent(projectId)}/candidates/${encodeURIComponent(candidateId)}/preview`
+}
+
 export function linkBuildCandidateRepair(parentCandidateId: string, replacementCandidateId: string): Promise<CandidateResponse> {
   return request<CandidateResponse>(`/v1/candidates/${encodeURIComponent(parentCandidateId)}/repair-link`, {
     method: 'POST',

@@ -548,6 +548,17 @@ onBeforeUnmount(() => {
               <span><strong>{{ evidenceLabels[evidence.kind] ?? evidence.kind }}</strong><small>{{ evidenceObserved(evidence) }}</small></span>
             </li>
           </ul>
+          <section v-if="session.remoteBuild?.candidatePreviewUrl" class="candidate-live-preview" aria-label="Candidate 人工试玩预览">
+            <header>
+              <div><strong>Candidate 人工试玩</strong><span>这是待审核构建，不会覆盖当前 Playable</span></div>
+              <Gamepad2 :size="16" />
+            </header>
+            <iframe
+              :src="session.remoteBuild.candidatePreviewUrl"
+              title="Candidate 人工试玩预览"
+              sandbox="allow-scripts allow-same-origin"
+            ></iframe>
+          </section>
           <section class="human-play-gate" :class="`is-${session.remoteBuild?.humanReview?.decision ?? 'pending'}`" aria-label="Human Play Review">
             <div class="human-play-gate-heading">
               <ShieldCheck :size="18" />

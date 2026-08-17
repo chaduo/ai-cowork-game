@@ -336,6 +336,12 @@ textarea:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(23, 111, 166,
 .candidate-evidence-list li > span { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .candidate-evidence-list li strong { color: var(--color-ink); font-size: 10px; }
 .candidate-evidence-list li small { overflow-wrap: anywhere; color: var(--color-text-muted); font-size: 10px; line-height: 1.4; }
+.candidate-live-preview { width: min(100%, 620px); margin-top: 18px; text-align: left; background: var(--color-surface); border: 1px solid var(--color-line-strong); }
+.candidate-live-preview > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 13px; color: var(--color-candidate); border-bottom: 1px solid var(--color-line); }
+.candidate-live-preview > header > div { display: flex; flex-direction: column; gap: 3px; }
+.candidate-live-preview > header strong { color: var(--color-ink); font-size: 11px; }
+.candidate-live-preview > header span { color: var(--color-text-muted); font-size: 9px; }
+.candidate-live-preview iframe { display: block; width: 100%; aspect-ratio: 16 / 9; border: 0; background: #111; }
 .human-play-gate { display: grid; gap: 12px; width: min(100%, 620px); margin-top: 18px; padding: 16px; text-align: left; background: var(--color-surface-subtle); border: 1px solid var(--color-line-strong); border-left: 3px solid var(--color-candidate); }
 .human-play-gate.is-accepted { border-left-color: var(--color-verified); background: var(--color-verified-soft); }
 .human-play-gate.is-rejected { border-left-color: var(--color-failed); background: #fff6f5; }

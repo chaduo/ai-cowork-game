@@ -12,6 +12,7 @@ import type { CreatorGameSpec } from '../contracts/creatorGameSpec'
 import {
   ApiClientError,
   cancelProjectBuild,
+  candidatePreviewUrl,
   createProjectBuild,
   getBuildCandidateTestReport,
   getHumanPlayReview,
@@ -77,6 +78,7 @@ export type RemoteBuildState = {
   errorMessage: string | null
   testGateStatus?: string
   testReport?: CandidateTestReportResponse | null
+  candidatePreviewUrl?: string | null
   testRunning?: boolean
   testError?: string | null
   humanReview?: HumanPlayReviewResponse | null
@@ -628,6 +630,9 @@ export async function testRemoteCandidate(projectId: string): Promise<void> {
     const response = await testBuildCandidate(candidateId)
     session.remoteBuild.testGateStatus = response.test_gate_status
     session.remoteBuild.testReport = response.report
+    session.remoteBuild.candidatePreviewUrl = response.test_gate_status === 'ready'
+      ? candidatePreviewUrl(projectId, candidateId)
+      : null
   } catch (cause) {
     session.remoteBuild.testError = cause instanceof ApiClientError ? cause.message : '平台验证暂时无法完成。'
   } finally {
@@ -644,6 +649,9 @@ export async function refreshRemoteCandidateTest(projectId: string): Promise<voi
     const response = await getBuildCandidateTestReport(candidateId)
     session.remoteBuild.testGateStatus = response.test_gate_status
     session.remoteBuild.testReport = response.report
+    session.remoteBuild.candidatePreviewUrl = response.test_gate_status === 'ready'
+      ? candidatePreviewUrl(projectId, candidateId)
+      : null
     session.remoteBuild.testError = null
   } catch (cause) {
     session.remoteBuild.testError = cause instanceof ApiClientError ? cause.message : '暂时无法读取平台验证证据。'
