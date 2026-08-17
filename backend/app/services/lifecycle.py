@@ -13,9 +13,11 @@ from app.models import (
     GameDesign,
     GameDesignRevision,
     GameSpecRevision,
+    HumanPlayReview,
     PlayableVersion,
     Project,
     Release,
+    TestReport,
     utc_now,
 )
 
@@ -216,24 +218,82 @@ class ProjectLifecycleService:
             return ProjectStage.DESIGN_REVIEW
         return ProjectStage.DESIGN_DRAFT
 
+    def record_human_play_review(
+        self,
+        candidate_id: str,
+        *,
+        decision: str,
+        notes: str = "",
+        amendment_status: str = "not_required",
+        drift_status: str = "clear",
+    ) -> HumanPlayReview:
+        candidate = self.session.get(BuildCandidate, candidate_id)
+        if candidate is None:
+            raise ValueError("candidate not found")
+        if candidate.status == "promoted":
+            raise ValueError("Human Play Review is immutable after promotion")
+        if candidate.status != "succeeded":
+            raise ValueError("Human Play Review requires a succeeded candidate")
+        if decision not in {"pending", "accepted", "rejected"}:
+            raise ValueError("invalid Human Play Review decision")
+        if amendment_status not in {"not_required", "confirmed", "unconfirmed"}:
+            raise ValueError("invalid amendment status")
+        if drift_status not in {"clear", "unresolved"}:
+            raise ValueError("invalid drift status")
+        review = self.session.scalar(select(HumanPlayReview).where(HumanPlayReview.candidate_id == candidate.id))
+        if review is None:
+            review = HumanPlayReview(candidate_id=candidate.id)
+            self.session.add(review)
+        review.decision = decision
+        review.notes = notes.strip()
+        review.amendment_status = amendment_status
+        review.drift_status = drift_status
+        review.reviewed_at = utc_now() if decision != "pending" else None
+        self.session.flush()
+        return review
+
+    def human_play_review(self, candidate_id: str) -> HumanPlayReview | None:
+        return self.session.scalar(select(HumanPlayReview).where(HumanPlayReview.candidate_id == candidate_id))
+
     def promote_candidate(
         self,
         candidate_id: str,
         *,
-        test_report_id: str,
-        verdict: str,
-        git_commit: str,
-        artifact_checksum: str,
+        git_commit: str | None = None,
+        # Kept as ignored compatibility parameters for pre-C14 callers. Gate
+        # truth always comes from persisted TestReport and Candidate fields.
+        test_report_id: str | None = None,
+        verdict: str | None = None,
+        artifact_checksum: str | None = None,
     ) -> PlayableVersion:
         candidate = self.session.get(BuildCandidate, candidate_id)
         if candidate is None:
             raise ValueError("candidate not found")
         if candidate.status == "promoted":
-            return self.session.scalar(select(PlayableVersion).where(PlayableVersion.candidate_id == candidate.id))
+            version = self.session.scalar(select(PlayableVersion).where(PlayableVersion.candidate_id == candidate.id))
+            if version is None:
+                raise ValueError("promoted candidate is missing its playable version")
+            return version
         if candidate.status != "succeeded":
             raise ValueError("only a succeeded candidate can be promoted")
-        if verdict != "pass":
-            raise ValueError("promotion requires a passing test report")
+        report = self.session.scalar(select(TestReport).where(TestReport.candidate_id == candidate.id))
+        if report is None or report.platform_verdict != "PASSED":
+            raise ValueError("promotion requires a persisted PASSED test report")
+        if candidate.test_gate_status != "ready":
+            raise ValueError("promotion requires a ready candidate test gate")
+        review = self.human_play_review(candidate.id)
+        if review is None or review.decision != "accepted":
+            raise ValueError("promotion requires an accepted Human Play Review")
+        if review.amendment_status not in {"not_required", "confirmed"}:
+            raise ValueError("promotion is blocked by an unconfirmed Amendment")
+        if review.drift_status != "clear":
+            raise ValueError("promotion is blocked by unresolved semantic drift")
+        if not candidate.artifact_path:
+            raise ValueError("promotion requires an artifact path")
+        if not candidate.artifact_checksum:
+            raise ValueError("promotion requires an artifact checksum")
+        if not git_commit or not git_commit.strip():
+            raise ValueError("promotion requires a git commit")
         project = self._project(candidate.project_id)
         latest_number = self.session.scalar(
             select(PlayableVersion.number)
@@ -245,10 +305,10 @@ class ProjectLifecycleService:
             candidate_id=candidate.id,
             number=latest_number + 1,
             parent_version_id=project.current_playable_version_id,
-            test_report_id=test_report_id,
-            git_commit=git_commit,
+            test_report_id=report.id,
+            git_commit=git_commit.strip(),
             artifact_path=candidate.artifact_path or "",
-            artifact_checksum=artifact_checksum,
+            artifact_checksum=candidate.artifact_checksum,
         )
         self.session.add(version)
         self.session.flush()
@@ -256,6 +316,64 @@ class ProjectLifecycleService:
         project.current_playable_version_id = version.id
         self.session.flush()
         return version
+
+    def restore_playable_version(self, project_id: str, version_id: str) -> BuildCandidate:
+        version = self.session.get(PlayableVersion, version_id)
+        if version is None:
+            raise ValueError("playable version not found")
+        if version.project_id != project_id:
+            raise ValueError("playable version does not belong to project")
+        existing = self.session.scalar(
+            select(BuildCandidate)
+            .where(
+                BuildCandidate.project_id == project_id,
+                BuildCandidate.source_playable_version_id == version.id,
+                BuildCandidate.status != "promoted",
+            )
+            .order_by(BuildCandidate.created_at.desc())
+        )
+        if existing is not None:
+            return existing
+        source_candidate = self.session.get(BuildCandidate, version.candidate_id)
+        if source_candidate is None:
+            raise ValueError("playable version source candidate not found")
+        source_build = self.session.get(Build, source_candidate.build_id)
+        if source_build is None:
+            raise ValueError("playable version source build not found")
+        project = self._project(project_id)
+        attempt = (self.session.scalar(
+            select(Build.attempt)
+            .where(Build.project_id == project_id)
+            .order_by(Build.attempt.desc())
+        ) or 0) + 1
+        now = utc_now()
+        build = Build(
+            project_id=project_id,
+            gamespec_revision_id=source_build.gamespec_revision_id,
+            parent_build_id=source_build.id,
+            attempt=attempt,
+            status="succeeded",
+            operation="restore",
+            request_text=f"Restore Playable v{version.number}",
+            baseline_playable_version_id=project.current_playable_version_id,
+            started_at=now,
+            ended_at=now,
+        )
+        self.session.add(build)
+        self.session.flush()
+        candidate = BuildCandidate(
+            project_id=project_id,
+            build_id=build.id,
+            status="succeeded",
+            test_gate_status="untested",
+            source_playable_version_id=version.id,
+            artifact_path=version.artifact_path,
+            artifact_checksum=version.artifact_checksum,
+            summary=f"Restore candidate from Playable v{version.number}",
+        )
+        self.session.add(candidate)
+        self.session.flush()
+        return candidate
 
     def publish_version(self, version_id: str) -> Release:
         version = self.session.get(PlayableVersion, version_id)
@@ -341,6 +459,7 @@ class ProjectLifecycleService:
         *,
         summary: str,
         artifact_path: str | None = None,
+        artifact_checksum: str | None = None,
         failure_code: str | None = None,
         diagnostics_json: str | None = None,
         build_context_id: str | None = None,
@@ -375,6 +494,7 @@ class ProjectLifecycleService:
             build_context_id=build_context_id,
             summary=summary,
             artifact_path=artifact_path,
+            artifact_checksum=artifact_checksum,
             diagnostics_json=diagnostics_json,
         )
         self.session.add(candidate)

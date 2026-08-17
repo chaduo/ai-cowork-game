@@ -53,6 +53,7 @@ class CandidateResponse(BaseModel):
     parent_candidate_id: str | None
     attempt: int
     repair_round: int
+    source_playable_version_id: str | None = None
     report: TestReportResponse | None = None
 
 
@@ -103,6 +104,7 @@ def _candidate_response(candidate: BuildCandidate, report: TestReport | None = N
         parent_candidate_id=candidate.parent_candidate_id,
         attempt=candidate.attempt,
         repair_round=candidate.repair_round,
+        source_playable_version_id=candidate.source_playable_version_id,
         report=_report_response(report) if report else None,
     )
 

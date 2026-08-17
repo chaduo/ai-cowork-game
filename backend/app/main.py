@@ -12,6 +12,7 @@ from app.api.design import router as design_router
 from app.api.runs import router as runs_router
 from app.api.builds import router as builds_router
 from app.api.candidates import router as candidates_router
+from app.api.playables import router as playables_router
 from app.agents.fake_game_agent import FakeGameAgent
 from app.agents.fake_candidate_test_runner import FakeCandidateTestRunner
 from app.services.builds import BuildService
@@ -47,6 +48,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(runs_router)
     app.include_router(builds_router)
     app.include_router(candidates_router)
+    app.include_router(playables_router)
 
     @app.middleware("http")
     async def add_request_id(request: Request, call_next):

@@ -275,11 +275,20 @@ class BuildService:
         diagnostics_json = json.dumps([item.model_dump(mode="json") for item in result.diagnostics], ensure_ascii=False)
         summary = "Build completed" if result.status == "succeeded" else (result.error.message if result.error else "Build failed")
         artifact_path = result.preview_entry or (result.artifact_manifest[0].path if result.artifact_manifest else None)
+        artifact_checksum = next(
+            (
+                item.sha256
+                for item in result.artifact_manifest
+                if item.path == artifact_path and item.sha256
+            ),
+            None,
+        )
         self.lifecycle.finish_build(
             build.id,
             result.status,
             summary=summary,
             artifact_path=artifact_path,
+            artifact_checksum=artifact_checksum,
             failure_code=result.error.code if result.error else None,
             diagnostics_json=diagnostics_json or None,
             build_context_id=self._ensure_context(build).id,
