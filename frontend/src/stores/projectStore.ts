@@ -9,7 +9,24 @@ import { createResourceCandidates as createResourceCandidatesFixture } from '../
 import { matchResourcesToSpec } from './resourceMatching'
 import type { ReleaseDraft, ReleasePhase, ReleaseRecord } from '../components/workspace/releaseTypes'
 import type { CreatorGameSpec } from '../contracts/creatorGameSpec'
-import { ApiClientError, cancelProjectBuild, createProjectBuild, getBuildCandidateTestReport, getProjectBuild, linkBuildCandidateRepair, testBuildCandidate, type BuildResponse, type CandidateTestReportResponse } from '../api/client'
+import {
+  ApiClientError,
+  cancelProjectBuild,
+  createProjectBuild,
+  getBuildCandidateTestReport,
+  getHumanPlayReview,
+  getProjectBuild,
+  linkBuildCandidateRepair,
+  listPlayableVersions,
+  playablePreviewUrl,
+  promoteBuildCandidate,
+  recordHumanPlayReview,
+  testBuildCandidate,
+  type BuildResponse,
+  type CandidateTestReportResponse,
+  type HumanPlayReviewResponse,
+  type PlayableVersionResponse,
+} from '../api/client'
 import type {
   CoworkMessage,
   GameSpecModel,
@@ -46,6 +63,7 @@ export type ProjectSession = {
   gamespecStatus: 'missing' | 'draft' | 'confirmed' | 'superseded'
   canonicalGameSpec: CreatorGameSpec | null
   gamespecRevisionId: string | null
+  gamespecGitCommit: string | null
   remoteBuild: RemoteBuildState | null
 }
 
@@ -61,6 +79,14 @@ export type RemoteBuildState = {
   testReport?: CandidateTestReportResponse | null
   testRunning?: boolean
   testError?: string | null
+  humanReview?: HumanPlayReviewResponse | null
+  reviewRunning?: boolean
+  reviewError?: string | null
+  playableVersion?: PlayableVersionResponse | null
+  previewUrl?: string | null
+  promoteRunning?: boolean
+  promoteError?: string | null
+  buildContextHash?: string | null
 }
 
 export type ProjectStore = {
@@ -388,6 +414,7 @@ export function createProjectSession(design: ConfirmedGameDesign, projectId?: st
     gamespecStatus: 'missing',
     canonicalGameSpec: null,
     gamespecRevisionId: null,
+    gamespecGitCommit: null,
     remoteBuild: null,
   }
 }
@@ -445,12 +472,13 @@ export function setProjectDesignStatus(projectId: string, status: ProjectSession
 
 export function setProjectGameSpecState(
   projectId: string,
-  state: { status: Exclude<ProjectSession['gamespecStatus'], 'missing'>; revisionId: string; spec: CreatorGameSpec },
+  state: { status: Exclude<ProjectSession['gamespecStatus'], 'missing'>; revisionId: string; spec: CreatorGameSpec; gitCommit?: string | null },
 ): void {
   const session = getProject(projectId)
   if (!session) return
   session.gamespecStatus = state.status
   session.gamespecRevisionId = state.revisionId
+  session.gamespecGitCommit = state.gitCommit ?? session.gamespecGitCommit
   session.canonicalGameSpec = state.spec
   touchProject(session)
 }
@@ -475,6 +503,7 @@ function applyRemoteBuildResponse(projectId: string, response: BuildResponse): v
     artifactPath: response.artifact_path,
     errorCode: response.error_code,
     errorMessage: response.error_message,
+    buildContextHash: response.build_context_hash,
   })
 }
 
@@ -613,6 +642,95 @@ export async function refreshRemoteCandidateTest(projectId: string): Promise<voi
     session.remoteBuild.testError = null
   } catch (cause) {
     session.remoteBuild.testError = cause instanceof ApiClientError ? cause.message : '暂时无法读取平台验证证据。'
+  }
+  touchProject(session)
+}
+
+export async function refreshRemoteHumanReview(projectId: string): Promise<void> {
+  const session = getProject(projectId)
+  const candidateId = session?.remoteBuild?.candidateId
+  if (!session?.remoteBuild || !candidateId) return
+  try {
+    session.remoteBuild.humanReview = await getHumanPlayReview(candidateId)
+    session.remoteBuild.reviewError = null
+  } catch (cause) {
+    if (cause instanceof ApiClientError && cause.code === 'human_play_review_not_found') {
+      session.remoteBuild.humanReview = null
+      session.remoteBuild.reviewError = null
+    } else {
+      session.remoteBuild.reviewError = cause instanceof ApiClientError ? cause.message : '暂时无法读取人工试玩状态。'
+    }
+  }
+  touchProject(session)
+}
+
+export async function reviewRemoteCandidate(
+  projectId: string,
+  decision: 'accepted' | 'rejected',
+  notes = '',
+): Promise<void> {
+  const session = getProject(projectId)
+  const candidateId = session?.remoteBuild?.candidateId
+  if (!session?.remoteBuild || !candidateId || session.remoteBuild.reviewRunning) return
+  session.remoteBuild.reviewRunning = true
+  session.remoteBuild.reviewError = null
+  touchProject(session)
+  try {
+    session.remoteBuild.humanReview = await recordHumanPlayReview(candidateId, { decision, notes })
+  } catch (cause) {
+    session.remoteBuild.reviewError = cause instanceof ApiClientError ? cause.message : '暂时无法保存人工试玩决定。'
+  } finally {
+    session.remoteBuild.reviewRunning = false
+    touchProject(session)
+  }
+}
+
+export async function promoteRemoteCandidate(projectId: string): Promise<void> {
+  const session = getProject(projectId)
+  const remote = session?.remoteBuild
+  const candidateId = remote?.candidateId
+  if (!session || !remote || !candidateId || remote.promoteRunning || remote.testGateStatus !== 'ready') return
+  remote.promoteRunning = true
+  remote.promoteError = null
+  touchProject(session)
+  try {
+    const gitCommit = session.gamespecGitCommit || remote.buildContextHash || remote.buildId
+    const version = await promoteBuildCandidate(candidateId, gitCommit)
+    remote.playableVersion = version
+    remote.previewUrl = playablePreviewUrl(projectId, version.version_id)
+    remote.promoteError = null
+    session.phase = 'playable_ready'
+  } catch (cause) {
+    remote.promoteError = cause instanceof ApiClientError ? cause.message : '暂时无法设为当前 Playable。'
+  } finally {
+    remote.promoteRunning = false
+    touchProject(session)
+  }
+}
+
+export async function refreshRemotePlayable(projectId: string): Promise<void> {
+  const session = getProject(projectId)
+  if (!session?.backendProjectId) return
+  try {
+    const versions = await listPlayableVersions(projectId)
+    const current = versions.find((version) => version.is_current) ?? versions[0]
+    if (!current) return
+    if (!session.remoteBuild) {
+      session.remoteBuild = {
+        buildId: '',
+        runId: '',
+        status: 'succeeded',
+        candidateId: current.candidate_id,
+        artifactPath: current.artifact_path,
+        errorCode: null,
+        errorMessage: null,
+      }
+    }
+    session.remoteBuild.playableVersion = current
+    session.remoteBuild.previewUrl = playablePreviewUrl(projectId, current.version_id)
+    session.phase = 'playable_ready'
+  } catch (cause) {
+    if (session.remoteBuild) session.remoteBuild.promoteError = cause instanceof ApiClientError ? cause.message : '暂时无法读取 Playable 版本。'
   }
   touchProject(session)
 }
