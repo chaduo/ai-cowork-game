@@ -13,8 +13,133 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from app.agents.game_design_planner import GameDesignProviderError, GameDesignProviderNotConfigured
-from app.contracts.design import CreatorGameDesignDraft
+from app.contracts.design import BrainstormQuestion, CreatorGameDesignDraft, DesignSummary
 from app.contracts.design_brainstorm import BrainstormInput, BrainstormTurn
+
+
+def _content_text(content: Any) -> str:
+    """Read the text variants used by OpenAI-compatible chat responses."""
+
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        if parts:
+            return "".join(parts)
+    raise ValueError("provider content is not text")
+
+
+def _decode_json(content: str) -> dict[str, Any]:
+    """Extract the first JSON object even when the model adds short prose."""
+
+    cleaned = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL | re.IGNORECASE).strip()
+    fenced = re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned, re.DOTALL | re.IGNORECASE)
+    candidate = fenced.group(1).strip() if fenced else cleaned
+    try:
+        decoded = json.loads(candidate)
+    except json.JSONDecodeError:
+        decoder = json.JSONDecoder()
+        decoded = None
+        for match in re.finditer(r"\{", candidate):
+            try:
+                decoded, _ = decoder.raw_decode(candidate[match.start() :])
+                break
+            except json.JSONDecodeError:
+                continue
+        if decoded is None:
+            raise
+    if not isinstance(decoded, dict):
+        raise ValueError("provider JSON root is not an object")
+    return decoded
+
+
+def _question(value: Any, *, question_index: int) -> BrainstormQuestion | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = {"prompt": value}
+    if not isinstance(value, dict):
+        raise ValueError("provider question is not an object")
+    normalized = dict(value)
+    prompt = normalized.get("prompt") or normalized.get("question") or normalized.get("title")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ValueError("provider question has no prompt")
+    question_id = normalized.get("id")
+    if not isinstance(question_id, str) or not question_id.strip():
+        question_id = f"provider-question-{question_index}"
+    choices = normalized.get("choices", normalized.get("options", []))
+    if choices is None:
+        choices = []
+    normalized_choices: list[dict[str, Any]] = []
+    if not isinstance(choices, list):
+        raise ValueError("provider question choices are not a list")
+    for index, choice in enumerate(choices):
+        if isinstance(choice, str):
+            choice = {"title": choice}
+        if not isinstance(choice, dict):
+            raise ValueError("provider question choice is not an object")
+        normalized_choice = dict(choice)
+        title = normalized_choice.get("title") or normalized_choice.get("label") or normalized_choice.get("text")
+        if not isinstance(title, str) or not title.strip():
+            raise ValueError("provider question choice has no title")
+        choice_id = normalized_choice.get("id")
+        if not isinstance(choice_id, str) or not choice_id.strip():
+            choice_id = f"choice-{index + 1}"
+        normalized_choices.append(
+            {
+                "id": choice_id,
+                "title": title.strip(),
+                "description": normalized_choice.get("description", ""),
+                "recommended": bool(normalized_choice.get("recommended", False)),
+            }
+        )
+    question_payload = {
+        "id": question_id,
+        "prompt": prompt.strip(),
+        "choices": normalized_choices[:4],
+    }
+    if isinstance(normalized.get("input_hint"), str):
+        question_payload["input_hint"] = normalized["input_hint"]
+    return BrainstormQuestion.model_validate(question_payload)
+
+
+def _turn(decoded: dict[str, Any], base: CreatorGameDesignDraft) -> BrainstormTurn:
+    """Normalize a provider proposal against the durable reducer-owned draft."""
+
+    raw_draft = decoded.get("draft", {})
+    if raw_draft is None:
+        raw_draft = {}
+    if not isinstance(raw_draft, dict):
+        raise ValueError("provider draft is not an object")
+
+    # The provider may propose language, but user decisions and readiness are
+    # reducer-owned. Start from the current draft and merge only descriptive
+    # fields so a partial model response remains safe and valid.
+    updates: dict[str, Any] = {}
+    for key in ("project_title", "scenario_id"):
+        value = raw_draft.get(key)
+        if isinstance(value, str) and value.strip():
+            updates[key] = value.strip()
+    raw_summary = raw_draft.get("summary")
+    if isinstance(raw_summary, dict):
+        summary = base.summary.model_dump(mode="json")
+        summary.update({key: value for key, value in raw_summary.items() if key in summary})
+        updates["summary"] = DesignSummary.model_validate(summary)
+
+    next_question = decoded.get("next_question", decoded.get("nextQuestion"))
+    if next_question is None and isinstance(raw_draft.get("clarification"), dict):
+        next_question = raw_draft["clarification"].get("current_question")
+    parsed_question = _question(next_question, question_index=base.clarification.question_index)
+    if parsed_question is None and base.readiness.status != "ready" and base.clarification.status != "confirmed":
+        raise ValueError("provider response has no next question")
+    clarification = base.clarification.model_copy(update={"current_question": parsed_question})
+    normalized_draft = base.model_copy(update={**updates, "clarification": clarification})
+    return BrainstormTurn(draft=normalized_draft, next_question=parsed_question)
 
 
 class OpenAICompatibleGameDesignPlanner:
@@ -92,10 +217,7 @@ class OpenAICompatibleGameDesignPlanner:
             raise GameDesignProviderError("Game Design provider request failed") from error
         try:
             content = body["choices"][0]["message"]["content"]
-            if not isinstance(content, str):
-                raise ValueError("provider content is not text")
-            fenced = re.search(r"```(?:json)?\s*(.*?)\s*```", content, re.DOTALL)
-            decoded = json.loads(fenced.group(1) if fenced else content)
-            return BrainstormTurn.model_validate(decoded)
+            decoded = _decode_json(_content_text(content))
+            return _turn(decoded, draft)
         except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as error:
             raise GameDesignProviderError("Game Design provider returned invalid brainstorm JSON") from error

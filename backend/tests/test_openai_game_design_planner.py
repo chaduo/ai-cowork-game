@@ -55,6 +55,45 @@ def test_provider_parses_fenced_json_without_leaking_credentials() -> None:
     assert turn.next_question.id == "exploration-core_experience"
 
 
+def test_provider_parses_json_surrounded_by_explanatory_text() -> None:
+    content = (
+        "我先整理这一轮结果：\n"
+        '{"draft":{"summary":{"title":"灯塔","summary":"探索灯塔","highlights":[],"core_loop":[],"progression":[]}},'
+        '"next_question":{"id":"exploration-core_experience","prompt":"玩家最想获得什么体验？","choices":[]}}\n'
+        "以上只是一轮设计建议。"
+    )
+
+    turn = _provider(content).plan_turn("project", _draft(), BrainstormInput(action="start"))
+
+    assert turn.draft.original_idea == "一个探索灯塔的游戏"
+    assert turn.draft.summary.summary == "探索灯塔"
+    assert turn.next_question is not None
+
+
+def test_provider_accepts_multisegment_text_content_and_partial_draft() -> None:
+    content = [
+        {"type": "text", "text": '{"draft":{"project_title":"新的灯塔"},'},
+        {
+            "type": "text",
+            "text": '"next_question":{"id":"exploration-goal","prompt":"玩家要达成什么目标？","choices":[]}}',
+        },
+    ]
+
+    planner = OpenAICompatibleGameDesignPlanner(
+        base_url="https://example.test/v1",
+        api_key="secret",
+        model="test-model",
+        opener=lambda request, timeout: _Response({"choices": [{"message": {"content": content}}]}),
+    )
+
+    turn = planner.plan_turn("project", _draft(), BrainstormInput(action="start"))
+
+    assert turn.draft.project_title == "新的灯塔"
+    assert turn.draft.original_idea == "一个探索灯塔的游戏"
+    assert turn.next_question is not None
+    assert turn.next_question.id == "exploration-goal"
+
+
 def test_provider_uses_compatible_json_instruction_without_response_format_extension() -> None:
     captured: dict = {}
 
