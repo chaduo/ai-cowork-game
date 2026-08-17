@@ -94,6 +94,21 @@ def test_provider_accepts_multisegment_text_content_and_partial_draft() -> None:
     assert turn.next_question.id == "exploration-goal"
 
 
+def test_provider_normalizes_follow_up_question_options_with_nulls() -> None:
+    content = (
+        '{"draft":{"summary":{"title":"灯塔","summary":"探索灯塔","highlights":null,"core_loop":[],"progression":[]}},'
+        '"next_question":{"id":"exploration-goal","prompt":"玩家要达成什么目标？",'
+        '"options":[{"id":"repair","label":"修复灯塔","description":null,"recommended":"false"}]}}'
+    )
+
+    turn = _provider(content).plan_turn("project", _draft(), BrainstormInput(action="answer", question_id="exploration-core_experience", answer="探索和发现"))
+
+    assert turn.next_question is not None
+    assert turn.next_question.choices[0].title == "修复灯塔"
+    assert turn.next_question.choices[0].description == ""
+    assert turn.next_question.choices[0].recommended is False
+
+
 def test_provider_uses_compatible_json_instruction_without_response_format_extension() -> None:
     captured: dict = {}
 
@@ -111,6 +126,36 @@ def test_provider_uses_compatible_json_instruction_without_response_format_exten
         planner.plan_turn("project", _draft(), BrainstormInput(action="start"))
 
     assert "response_format" not in captured
+
+
+def test_provider_prompt_requests_incremental_brainstorm_payload() -> None:
+    captured: dict = {}
+
+    def opener(request, timeout):
+        captured.update(json.loads(request.data.decode()))
+        return _Response(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"next_question":{"id":"q","prompt":"下一步是什么？","choices":[]}}'
+                        }
+                    }
+                ]
+            }
+        )
+
+    planner = OpenAICompatibleGameDesignPlanner(
+        base_url="https://example.test/v1",
+        api_key="secret",
+        model="test-model",
+        opener=opener,
+    )
+    planner.plan_turn("project", _draft(), BrainstormInput(action="start"))
+
+    system_prompt = captured["messages"][0]["content"]
+    assert "draft 可省略" in system_prompt
+    assert "不要输出 decisions/readiness/original_idea" in system_prompt
 
 
 def test_kimi_provider_request_disables_thinking_and_sets_completion_mode() -> None:

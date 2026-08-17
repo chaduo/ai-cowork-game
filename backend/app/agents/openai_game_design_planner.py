@@ -94,8 +94,8 @@ def _question(value: Any, *, question_index: int) -> BrainstormQuestion | None:
             {
                 "id": choice_id,
                 "title": title.strip(),
-                "description": normalized_choice.get("description", ""),
-                "recommended": bool(normalized_choice.get("recommended", False)),
+                "description": normalized_choice.get("description") if isinstance(normalized_choice.get("description"), str) else "",
+                "recommended": _as_bool(normalized_choice.get("recommended", False)),
             }
         )
     question_payload = {
@@ -106,6 +106,12 @@ def _question(value: Any, *, question_index: int) -> BrainstormQuestion | None:
     if isinstance(normalized.get("input_hint"), str):
         question_payload["input_hint"] = normalized["input_hint"]
     return BrainstormQuestion.model_validate(question_payload)
+
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "是", "推荐"}
+    return bool(value)
 
 
 def _turn(decoded: dict[str, Any], base: CreatorGameDesignDraft) -> BrainstormTurn:
@@ -128,7 +134,11 @@ def _turn(decoded: dict[str, Any], base: CreatorGameDesignDraft) -> BrainstormTu
     raw_summary = raw_draft.get("summary")
     if isinstance(raw_summary, dict):
         summary = base.summary.model_dump(mode="json")
-        summary.update({key: value for key, value in raw_summary.items() if key in summary})
+        for key, value in raw_summary.items():
+            if key in {"title", "summary"} and isinstance(value, str) and value.strip():
+                summary[key] = value.strip()
+            elif key in {"highlights", "core_loop", "progression"} and isinstance(value, list):
+                summary[key] = [item.strip() for item in value if isinstance(item, str) and item.strip()]
         updates["summary"] = DesignSummary.model_validate(summary)
 
     next_question = decoded.get("next_question", decoded.get("nextQuestion"))
@@ -175,7 +185,9 @@ class OpenAICompatibleGameDesignPlanner:
                         "你是游戏设计 Brainstorm 助手。只返回 JSON，不要 Markdown。"
                         "一次只处理一个最高优先级阻塞问题，给出 2 到 4 个中文选项，允许自由输入。"
                         "只做 First Playable 必需决定，不要替用户确认，不要返回 workflow 状态。"
-                        "JSON 必须符合 {draft:{...},next_question:{...}|null}。"
+                        "请返回增量结果：draft 可省略或只包含 summary、project_title、scenario_id；"
+                        "不要输出 decisions/readiness/original_idea。必须包含 next_question（完成 First Playable 时可为 null）。"
+                        "JSON 形如 {draft:{...},next_question:{...}|null}。"
                     ),
                 },
                 {
