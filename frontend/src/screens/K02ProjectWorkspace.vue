@@ -39,6 +39,8 @@ import {
   startRemoteBuild,
   refreshRemoteBuild,
   refreshRemoteCandidateTest,
+  refreshRemoteHumanReview,
+  refreshRemotePlayable,
   rebuildRemoteCandidate,
   testRemoteCandidate,
   retryScopeViolation as retryProjectScopeViolation,
@@ -392,12 +394,24 @@ onMounted(async () => {
           spec: response.spec,
         })
         if (response.status === 'confirmed') {
-          if (getCurrentPlayable(session)) setWorkspacePhase(session.id, 'playable_ready')
-          else if (session.backendProjectId && session.remoteBuild) {
-            await refreshRemoteBuild(session.id)
-            await refreshRemoteCandidateTest(session.id)
-          }
-          else if (session.backendProjectId) void startRemoteBuild(session.id)
+          if (session.backendProjectId) {
+            // Restore the real Playable first. A refresh must never create a
+            // second Build when a durable version or run already exists.
+            await refreshRemotePlayable(session.id)
+            if (session.remoteBuild?.buildId) await refreshRemoteBuild(session.id)
+            if (session.remoteBuild?.candidateId) {
+              await refreshRemoteCandidateTest(session.id)
+              await refreshRemoteHumanReview(session.id)
+            }
+            if (session.remoteBuild?.playableVersion) {
+              activeTab.value = 'preview'
+              setWorkspacePhase(session.id, 'playable_ready')
+            } else if (session.remoteBuild?.buildId) {
+              activeTab.value = session.remoteBuild.status === 'succeeded' ? 'build' : 'preview'
+            } else {
+              void startRemoteBuild(session.id)
+            }
+          } else if (getCurrentPlayable(session)) setWorkspacePhase(session.id, 'playable_ready')
           else confirmSpecAndStartBuild(session.id)
         }
       } catch (cause) {

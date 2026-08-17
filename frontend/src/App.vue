@@ -69,14 +69,16 @@ function hydrateProjectSession(record: ProjectResponse) {
   // A restored local session already contains the prototype's durable build
   // state. Only new sessions need the initial local generation transition.
   if (!existing) completeGeneration(session.id)
-  if (record.current_playable && session.playableVersions.length === 0) {
+  // Backend projects restore their real Playable through the version endpoint
+  // in K02. Keep the local fixture snapshot only for offline/demo sessions.
+  if (record.current_playable && !session.backendProjectId && session.playableVersions.length === 0) {
     appendPlayableVersion(session.id, {
       reason: 'initial',
       name: `${record.name} · Playable v${record.current_playable.number}`,
       summary: '从已保存的 Project 状态恢复。',
     })
   }
-  if (!record.current_playable && record.stage === 'candidate_review' && record.candidate_review) {
+  if (record.stage === 'candidate_review' && record.candidate_review) {
     hydrateRemoteBuild(session.id, {
       buildId: record.candidate_review.build_id,
       runId: record.candidate_review.run_id,

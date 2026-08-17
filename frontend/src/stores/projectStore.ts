@@ -495,7 +495,9 @@ function clearRemoteBuildPoller(projectId: string): void {
 function applyRemoteBuildResponse(projectId: string, response: BuildResponse): void {
   const session = getProject(projectId)
   if (!session) return
+  const previous = session.remoteBuild
   applyRemoteBuildState(session, {
+    ...previous,
     buildId: response.build_id,
     runId: response.run_id,
     status: response.status,
@@ -509,7 +511,10 @@ function applyRemoteBuildResponse(projectId: string, response: BuildResponse): v
 
 function applyRemoteBuildState(session: ProjectSession, state: RemoteBuildState): void {
   session.remoteBuild = state
-  if (state.status === 'succeeded' && state.candidateId) {
+  if (state.playableVersion) {
+    session.phase = 'playable_ready'
+    clearRemoteBuildPoller(session.id)
+  } else if (state.status === 'succeeded' && state.candidateId) {
     // A successful build creates a Candidate only. Promotion remains a Human Gate.
     session.phase = 'candidate_ready'
     clearRemoteBuildPoller(session.id)
