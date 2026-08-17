@@ -155,6 +155,12 @@ class Run(Base):
     # did not reuse a prior partial workspace.
     workspace_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     workspace_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # line-115: the OpenGame provider session id, captured from the run's first
+    # `system` event. Lets ContinuationService resume the paused session
+    # (`opengame --resume <id>`) when its blocking decision is resolved. NULL for
+    # pre-line-115 / Fake / test runs; a waiting run with no session id cannot be
+    # resumed and the continuation path surfaces that as a structured failure.
+    opengame_session_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
