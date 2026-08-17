@@ -173,9 +173,10 @@ def test_provider_prompt_requests_incremental_brainstorm_payload() -> None:
     system_prompt = captured["messages"][0]["content"]
     assert "draft 可省略" in system_prompt
     assert "不要输出 decisions/readiness/original_idea" in system_prompt
+    assert '"next_question":{"id":"...","prompt":"..."' in system_prompt
 
 
-def test_kimi_provider_request_disables_thinking_and_sets_completion_mode() -> None:
+def test_kimi_provider_request_uses_only_supported_completion_fields() -> None:
     captured: list[dict] = []
 
     def opener(request, timeout):
@@ -191,7 +192,7 @@ def test_kimi_provider_request_disables_thinking_and_sets_completion_mode() -> N
     with pytest.raises(GameDesignProviderError):
         planner.plan_turn("project", _draft(), BrainstormInput(action="start"))
 
-    assert captured[0]["thinking"] == {"type": "disabled"}
+    assert "thinking" not in captured[0]
     assert captured[0]["stream"] is False
     assert captured[0]["max_tokens"] >= 2048
     assert captured[0]["temperature"] == 1

@@ -161,6 +161,16 @@ def _turn(decoded: dict[str, Any], base: CreatorGameDesignDraft) -> BrainstormTu
     return BrainstormTurn(draft=normalized_draft, next_question=parsed_question)
 
 
+def _parse_failure_kind(error: Exception) -> str:
+    if isinstance(error, json.JSONDecodeError):
+        return "malformed_json"
+    if isinstance(error, KeyError):
+        return "missing_response_field"
+    if error.__class__.__name__ == "ValidationError":
+        return "schema_mismatch"
+    return "invalid_response_shape"
+
+
 class OpenAICompatibleGameDesignPlanner:
     def __init__(
         self,
@@ -245,7 +255,7 @@ class OpenAICompatibleGameDesignPlanner:
                         "只做 First Playable 必需决定，不要替用户确认，不要返回 workflow 状态。"
                         "请返回增量结果：draft 可省略或只包含 summary、project_title、scenario_id；"
                         "不要输出 decisions/readiness/original_idea。必须包含 next_question（完成 First Playable 时可为 null）。"
-                        "JSON 形如 {draft:{...},next_question:{...}|null}。"
+                        'JSON 形如 {"next_question":{"id":"...","prompt":"...","choices":[]},"draft":{}}。'
                     ),
                 },
                 {
@@ -257,17 +267,11 @@ class OpenAICompatibleGameDesignPlanner:
                 },
             ],
         }
-        # Kimi K3 exposes a reasoning mode that the working OpenGame adapter
-        # explicitly disables for short structured turns. Keep the extension
-        # scoped to Kimi so other OpenAI-compatible providers receive standard
-        # Chat Completions fields only.
-        if self.model.lower().startswith("kimi"):
-            payload["thinking"] = {"type": "disabled"}
-
         try:
             return self._parse_turn(self._request_json(payload), draft)
-        except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as first_error:
+        except (AttributeError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
             try:
                 return self._parse_turn(self._request_json(self._repair_payload(payload)), draft)
-            except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as second_error:
-                raise GameDesignProviderError("Game Design provider returned invalid brainstorm JSON") from second_error
+            except (AttributeError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as second_error:
+                kind = _parse_failure_kind(second_error)
+                raise GameDesignProviderError(f"Game Design provider returned invalid brainstorm JSON ({kind})") from second_error
