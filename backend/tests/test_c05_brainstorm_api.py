@@ -77,3 +77,24 @@ def test_unconfigured_brainstorm_provider_fails_closed(isolated_database) -> Non
 
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "game_design_provider_not_configured"
+
+
+def test_first_playable_readiness_allows_confirm_after_five_core_decisions(isolated_database) -> None:
+    client = _client(str(isolated_database.url))
+    project = _project(client, key="ready", idea="一个探索灯塔并修复旧设备的小游戏")
+    turn = client.post(f"/api/v1/projects/{project['id']}/design/brainstorm", json={"action": "start"}).json()
+
+    for _ in range(5):
+        question = turn["next_question"]
+        assert question is not None
+        choice = question["choices"][0]
+        turn = client.post(
+            f"/api/v1/projects/{project['id']}/design/brainstorm",
+            json={"action": "answer", "question_id": question["id"], "answer_id": choice["id"], "answer": choice["title"]},
+        ).json()
+
+    assert turn["readiness"]["status"] == "ready"
+    assert turn["next_question"] is None
+    confirmed = client.post(f"/api/v1/projects/{project['id']}/design/confirm")
+    assert confirmed.status_code == 200
+    assert confirmed.json()["status"] == "confirmed"

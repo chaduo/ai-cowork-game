@@ -36,7 +36,7 @@ def _category(question_id: str) -> str | None:
         "feedback": ("feedback", "response", "reward", "反馈", "回馈"),
         "progression": ("progress", "growth", "advance", "成长", "进展"),
         "scope": ("scope", "v1", "size", "范围", "第一版"),
-        "completion": ("complete", "finish", "win", "success", "完成", "结束"),
+        "completion": ("complete", "completion", "finish", "win", "success", "完成", "结束"),
     }
     for category, words in aliases.items():
         if any(word in value for word in words):
