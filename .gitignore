@@ -29,7 +29,10 @@ secrets.json
 *.sqlite
 *.sqlite3
 .ogf/
-data/workspaces/
+# Runtime data lives under backend/ (cwd of the FastAPI app); the services default
+# to data/workspaces (C13) and data/project-repos (C20) relative to backend/.
+backend/data/workspaces/
+backend/data/project-repos/
 
 # Operating-system files
 .DS_Store
