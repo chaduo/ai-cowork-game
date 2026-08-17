@@ -63,3 +63,11 @@
 - 测试：`test_c20_project_git.py`（38：init/commit/tag/read/确定性/路径策略/密钥扫描/重启恢复/布局不变量）、`test_c20_provenance.py`（8：resolve/restart 恢复/Release 传递/漂移/missing）。
 - 验证：离线全量 198 passed / 1 skipped / 0 failed；C20 零迁移、零 `models.py`/`migrations/`/`lifecycle.py`/`api/` 改动（`git diff --stat origin/main..HEAD` 仅新文件 + pyproject + 2 docs）。
 - 真实 Promote 插入证明：测试把 `ProjectGitService` 真实 commit sha 作为 `promote_candidate(git_commit=...)` 参数传入，**不改 `lifecycle.py`** 即证明原语可接入（line 114 wiring 再接线）。
+
+## 7. line-114 wiring slice (2026-08-17) — Confirm/Promote/Publish checkpoints
+
+- `backend/app/services/checkpoint.py`：`CheckpointService`（zhang-owned）包装 4 个 `ProjectLifecycleService` gate，**不改 gate 函数体**（`git diff` of `lifecycle.py` 为空，owner 边界保持）：Confirm GDD/GameSpec → commit `gdd/{rev}.json`/`gamespec/{rev}.json` + 记 `git_commit` + tag；Promote → 从 C13 run workspace 读真 artifact → commit `playable/index.html` + sha256 checksum + 覆写 `PlayableVersion.git_commit`/`artifact_checksum` 为真 sha（替代 pre-C20 的调用方 dummy 字符串）；Publish → tag `release-{n}` + `Release.git_commit` 快照。
+- migration `0012_c20_checkpoint`：`game_design_revisions`/`game_spec_revisions`/`releases` 加 nullable `git_commit`（`playable_versions.git_commit` 已存在）。
+- API `design.py` Confirm GDD/GameSpec 端点调 `CheckpointService` + 响应带 `git_commit`。
+- 测试 `test_c20_checkpoint.py`（8）：4 gate round-trip + 幂等 + 重启可恢复 + Release 解析 + owner 边界不变量；离线全量 272 passed / 0 failed。
+- Promote/Publish REST 端点 deferred 到 C14/C16（`CheckpointService.promote`/`publish` helper 已就绪，C14/C16 端点调之即可）。本切片堆在未合并的 C20 primitives PR 之上。

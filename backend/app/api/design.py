@@ -10,6 +10,7 @@ from app.contracts.design import CreatorGameDesignDraft, DesignReadiness
 from app.contracts.gamespec import CreatorGameSpec
 from app.errors import ApiError
 from app.models import GameDesign, GameDesignRevision, GameSpecRevision, Project
+from app.services.checkpoint import CheckpointService
 from app.services.lifecycle import DesignNotReadyError, ProjectLifecycleService
 
 router = APIRouter(prefix="/api/v1/projects", tags=["design"])
@@ -24,6 +25,7 @@ class DesignResponse(BaseModel):
     confirmed_revision_number: int | None
     status: str
     confirmed_at: datetime | None
+    git_commit: str | None = None  # C20: immutable checkpoint of the confirmed GDD
     readiness: DesignReadiness
     draft: CreatorGameDesignDraft
 
@@ -34,6 +36,7 @@ class GameSpecResponse(BaseModel):
     revision_number: int
     status: str
     confirmed_at: datetime | None
+    git_commit: str | None = None  # C20: immutable checkpoint of the confirmed GameSpec
     source_design_revision_id: str | None
     validation_errors: list[dict]
     spec: CreatorGameSpec
@@ -90,6 +93,7 @@ def _response(session: Session, project: Project, design: GameDesign | None) -> 
         confirmed_revision_number=confirmed_revision.revision_number if confirmed_revision else None,
         status=design.status if design else "draft",
         confirmed_at=design.confirmed_at if design else None,
+        git_commit=confirmed_revision.git_commit if confirmed_revision else None,
         readiness=readiness,
         draft=draft,
     )
@@ -106,6 +110,7 @@ def _gamespec_response(project: Project, revision: GameSpecRevision) -> GameSpec
         revision_number=revision.revision_number,
         status=revision.status,
         confirmed_at=revision.confirmed_at,
+        git_commit=revision.git_commit,
         source_design_revision_id=revision.source_design_revision_id,
         validation_errors=[],
         spec=spec,
@@ -145,6 +150,9 @@ def confirm_design(project_id: str, request: Request) -> DesignResponse:
                 cause.readiness.blockers + cause.readiness.unresolved_decisions,
                 409,
             ) from cause
+        # C20 line-114: record the immutable Git checkpoint for the confirmed GDD.
+        if confirmed.confirmed_revision_id:
+            CheckpointService(session).confirm_gdd(project.id, confirmed.confirmed_revision_id)
         session.commit()
         return _response(session, project, confirmed)
 
@@ -191,5 +199,7 @@ def confirm_gamespec(project_id: str, request: Request) -> GameSpecResponse:
             raise ApiError("gamespec_not_found", "GameSpec has not been prepared", [], 404)
         response = _gamespec_response(project, revision)
         confirmed = ProjectLifecycleService(session).confirm_gamespec_revision(project.id, revision.id)
+        # C20 line-114: record the immutable Git checkpoint for the confirmed GameSpec.
+        CheckpointService(session).confirm_gamespec(project.id, confirmed.id)
         session.commit()
         return _gamespec_response(project, confirmed)

@@ -111,7 +111,7 @@ No new scope starts while the previous day's vertical gate is red.
 
 **zhang**
 
-- [ ] Finish C20 Confirm GDD/GameSpec, Promote and Publish checkpoint support.
+- [x] Finish C20 Confirm GDD/GameSpec, Promote and Publish checkpoint support. — Done 2026-08-17: `CheckpointService` (`backend/app/services/checkpoint.py`, zhang-owned) wraps the four `ProjectLifecycleService` gates WITHOUT modifying them (zhao's ownership preserved — `git diff` of `lifecycle.py` gate bodies is empty): Confirm GDD → commits `gdd/{rev}.json` + `GameDesignRevision.git_commit` + tag; Confirm GameSpec → `gamespec/{rev}.json` + `GameSpecRevision.git_commit`; Promote → imports the candidate's real artifact from the C13 run workspace into `playable/index.html`, computes sha256, overwrites `PlayableVersion.git_commit`/`artifact_checksum` with the REAL sha (replacing the pre-C20 caller-supplied dummy string); Publish → tags `release-{n}` + `Release.git_commit` snapshot. Migration `0012_c20_checkpoint` adds nullable `git_commit` to `game_design_revisions`/`game_spec_revisions`/`releases` (`playable_versions.git_commit` already existed). API `design.py` Confirm GDD/GameSpec endpoints call `CheckpointService` and surface `git_commit`. Reuse C20 `ProjectGitService`/`ProvenanceService`/`app.redaction`. 8 checkpoint tests pass (round-trip + idempotent + restart-recoverable + Release resolution + owner-boundary invariant); offline full 272/0. Promote/Publish REST endpoints deferred to C14/C16 (the `CheckpointService.promote`/`publish` helpers exist now). Branch is stacked on the unmerged C20 primitives PR.
 - [ ] Add provider continuation/rebuild fallback for a resolved blocking decision.
 - [ ] Required Review C14/C15/C21 failure and isolation paths.
 
