@@ -183,6 +183,10 @@ watch(phase, (nextPhase) => {
   else if (previewPhases.includes(nextPhase) || nextPhase === 'scope_violation') activeTab.value = 'preview'
 })
 
+watch(() => session.remoteBuild?.testGateStatus, (status) => {
+  if (status === 'ready' && phase.value === 'candidate_ready') activeTab.value = 'build'
+})
+
 function useRelationshipResource() {
   if (!relationshipResource.value) return
   useProjectRelationshipResource(session.id, relationshipResource.value.id)
@@ -643,6 +647,7 @@ onBeforeUnmount(() => {
           :phase="phase as BuildPhase | ChangePhase"
           :playable="playable"
           :real-preview-url="session.remoteBuild?.previewUrl"
+          :candidate-preview-url="session.remoteBuild?.candidatePreviewUrl"
           :release="currentRelease"
           :resource-bridge-acknowledged="resourceBridgeAcknowledged"
           :resource-pending-count="resourcePendingCount"
