@@ -41,6 +41,7 @@ import {
   refreshRemoteCandidateTest,
   refreshRemoteHumanReview,
   refreshRemotePlayable,
+  restoreRemoteWorkspacePhase,
   reviewRemoteCandidate,
   promoteRemoteCandidate,
   rebuildRemoteCandidate,
@@ -425,12 +426,10 @@ onMounted(async () => {
               await refreshRemoteCandidateTest(session.id)
               await refreshRemoteHumanReview(session.id)
             }
-            if (session.remoteBuild?.playableVersion) {
-              activeTab.value = 'preview'
-              setWorkspacePhase(session.id, 'playable_ready')
-            } else if (session.remoteBuild?.buildId) {
-              activeTab.value = session.remoteBuild.status === 'succeeded' ? 'build' : 'preview'
-            } else {
+            const restoredRoute = restoreRemoteWorkspacePhase(session.id)
+            if (restoredRoute === 'playable') activeTab.value = 'preview'
+            else if (restoredRoute === 'candidate' || restoredRoute === 'building' || restoredRoute === 'error') activeTab.value = 'build'
+            else {
               void startRemoteBuild(session.id)
             }
           } else if (getCurrentPlayable(session)) setWorkspacePhase(session.id, 'playable_ready')
