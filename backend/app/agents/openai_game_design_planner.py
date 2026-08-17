@@ -38,7 +38,9 @@ class OpenAICompatibleGameDesignPlanner:
             raise GameDesignProviderNotConfigured("Game Design provider is not configured")
         payload = {
             "model": self.model,
-            "temperature": 0.2,
+            # Kimi K3's compatible endpoint currently accepts only temperature=1.
+            # Other providers keep the lower-variance setting for structured turns.
+            "temperature": 1 if self.model.lower().startswith("kimi") else 0.2,
             "max_tokens": 6000,
             "stream": False,
             "messages": [

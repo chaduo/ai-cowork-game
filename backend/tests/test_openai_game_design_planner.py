@@ -93,6 +93,7 @@ def test_kimi_provider_request_disables_thinking_and_sets_completion_mode() -> N
     assert captured["thinking"] == {"type": "disabled"}
     assert captured["stream"] is False
     assert captured["max_tokens"] >= 2048
+    assert captured["temperature"] == 1
 
 
 def test_provider_rejects_malformed_json() -> None:
