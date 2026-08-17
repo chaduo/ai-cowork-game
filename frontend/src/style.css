@@ -336,8 +336,28 @@ textarea:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(23, 111, 166,
 .candidate-evidence-list li > span { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .candidate-evidence-list li strong { color: var(--color-ink); font-size: 10px; }
 .candidate-evidence-list li small { overflow-wrap: anywhere; color: var(--color-text-muted); font-size: 10px; line-height: 1.4; }
+.human-play-gate { display: grid; gap: 12px; width: min(100%, 620px); margin-top: 18px; padding: 16px; text-align: left; background: var(--color-surface-subtle); border: 1px solid var(--color-line-strong); border-left: 3px solid var(--color-candidate); }
+.human-play-gate.is-accepted { border-left-color: var(--color-verified); background: var(--color-verified-soft); }
+.human-play-gate.is-rejected { border-left-color: var(--color-failed); background: #fff6f5; }
+.human-play-gate-heading { display: flex; align-items: flex-start; gap: 10px; }
+.human-play-gate-heading > svg { flex: none; color: var(--color-candidate); }
+.human-play-gate.is-accepted .human-play-gate-heading > svg { color: var(--color-verified); }
+.human-play-gate.is-rejected .human-play-gate-heading > svg { color: var(--color-failed); }
+.human-play-gate-heading strong { color: var(--color-ink); font-size: 13px; }
+.human-play-gate-heading p { margin-top: 4px; color: var(--color-text-muted); font-size: 10px; line-height: 1.55; }
+.human-play-notes { width: 100%; min-height: 58px; padding: 9px 10px; resize: vertical; color: var(--color-text); font: inherit; font-size: 10px; line-height: 1.5; background: var(--color-surface); border: 1px solid var(--color-line-strong); border-radius: 3px; }
+.human-play-notes:focus { outline: 2px solid var(--color-accent-soft); border-color: var(--color-accent); }
+.human-play-actions, .human-play-promote { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.human-play-actions button, .human-play-promote button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 0 12px; color: var(--color-ink); font-size: 10px; font-weight: 700; background: var(--color-surface); border: 1px solid var(--color-line-strong); border-radius: 3px; cursor: pointer; }
+.human-play-actions button:disabled, .human-play-promote button:disabled { cursor: wait; opacity: .55; }
+.human-play-actions .human-play-accept, .human-play-promote button { color: #fff; background: var(--color-verified); border-color: var(--color-verified); }
+.human-play-actions .human-play-reject { color: var(--color-failed); }
+.human-play-promote { justify-content: space-between; }
+.human-play-promote > span { display: inline-flex; align-items: center; gap: 6px; color: var(--color-verified); font-size: 10px; }
+.human-play-gate.is-rejected .human-play-promote > span { color: var(--color-failed); }
 @media (max-width: 680px) { .candidate-ready-meta { grid-template-columns: 1fr; } }
 @media (max-width: 680px) { .candidate-test-gate { align-items: stretch; flex-direction: column; } .candidate-evidence-list { grid-template-columns: 1fr; } }
+@media (max-width: 680px) { .human-play-actions, .human-play-promote { align-items: stretch; flex-direction: column; } .human-play-actions button, .human-play-promote button { width: 100%; } }
 
 .creator-hero {
   position: relative;
@@ -1302,6 +1322,8 @@ textarea:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(23, 111, 166,
 .preview-build-meta strong:has(svg) { color: var(--color-verified); }
 .preview-build-meta small { color: var(--color-text-muted); font: 8px/1 var(--font-mono); }
 .farm-preview-frame { position: relative; aspect-ratio: 16 / 9; margin-top: 20px; overflow: hidden; background: #17211f; border: 1px solid var(--color-line-strong); }
+.real-preview-frame { background: #111; }
+.real-preview-frame iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
 .farm-preview-frame > img { display: block; width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; }
 .neutral-preview-scene { display: grid; place-items: center; gap: 18px; height: 100%; padding: 24px; color: #e8f0ea; background: linear-gradient(135deg, #29433c, #53705f); }
 .preview-variant-coffee .neutral-preview-scene { background: linear-gradient(135deg, #573f35, #a97b5b); }

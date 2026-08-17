@@ -70,6 +70,7 @@ export interface GameSpecResponse {
   revision_number: number
   status: 'draft' | 'confirmed' | 'superseded'
   confirmed_at: string | null
+  git_commit: string | null
   source_design_revision_id: string | null
   validation_errors: Array<Record<string, unknown>>
   spec: CreatorGameSpec

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowLeft, ArrowRight, Check, ChevronRight, CircleX, FileCode2, Gamepad2, Hammer, Image, LoaderCircle, MonitorPlay, ScrollText, SlidersHorizontal } from 'lucide-vue-next'
+import { ArrowLeft, ArrowRight, Check, ChevronRight, CircleX, FileCode2, Gamepad2, Hammer, Image, LoaderCircle, MonitorPlay, Rocket, ScrollText, ShieldCheck, SlidersHorizontal, ThumbsDown } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AssetGalleryReadOnly from '../components/workspace/AssetGalleryReadOnly.vue'
 import ArtifactEmptyState from '../components/workspace/ArtifactEmptyState.vue'
@@ -41,6 +41,8 @@ import {
   refreshRemoteCandidateTest,
   refreshRemoteHumanReview,
   refreshRemotePlayable,
+  reviewRemoteCandidate,
+  promoteRemoteCandidate,
   rebuildRemoteCandidate,
   testRemoteCandidate,
   retryScopeViolation as retryProjectScopeViolation,
@@ -79,6 +81,7 @@ const changePlan = computed(() => session.changePlan)
 const versionHistoryOpen = ref(false)
 const releaseReviewOpen = ref(false)
 const releaseDetailOpen = ref(false)
+const humanReviewNotes = ref('')
 const releasePhase = computed(() => session.releasePhase)
 const resourceBridgeAcknowledged = computed(() => session.resourceBridgeAcknowledged)
 const playable = computed(() => getCurrentPlayable(session))
@@ -228,6 +231,7 @@ async function persistGameSpecDraft() {
       status: response.status,
       revisionId: response.revision_id,
       spec: response.spec,
+      gitCommit: response.git_commit,
     })
     return true
   } catch (cause) {
@@ -258,6 +262,7 @@ async function confirmGameSpec() {
       status: response.status,
       revisionId: response.revision_id,
       spec: response.spec,
+      gitCommit: response.git_commit,
     })
     activeTab.value = 'build'
     if (session.backendProjectId) void startRemoteBuild(session.id)
@@ -288,6 +293,18 @@ function runCandidateTest() {
 
 function rebuildCandidate() {
   void rebuildRemoteCandidate(session.id)
+}
+
+function acceptCandidate() {
+  void reviewRemoteCandidate(session.id, 'accepted', humanReviewNotes.value)
+}
+
+function rejectCandidate() {
+  void reviewRemoteCandidate(session.id, 'rejected', humanReviewNotes.value)
+}
+
+function promoteCandidate() {
+  void promoteRemoteCandidate(session.id)
 }
 
 function requestChange(source: ChangeSource, request?: string) {
@@ -392,6 +409,7 @@ onMounted(async () => {
           status: response.status,
           revisionId: response.revision_id,
           spec: response.spec,
+          gitCommit: response.git_commit,
         })
         if (response.status === 'confirmed') {
           if (session.backendProjectId) {
@@ -530,6 +548,46 @@ onBeforeUnmount(() => {
               <span><strong>{{ evidenceLabels[evidence.kind] ?? evidence.kind }}</strong><small>{{ evidenceObserved(evidence) }}</small></span>
             </li>
           </ul>
+          <section class="human-play-gate" :class="`is-${session.remoteBuild?.humanReview?.decision ?? 'pending'}`" aria-label="Human Play Review">
+            <div class="human-play-gate-heading">
+              <ShieldCheck :size="18" />
+              <div>
+                <strong>Human Play Review</strong>
+                <p v-if="session.remoteBuild?.humanReview?.decision === 'accepted'">你已确认这个 Candidate 可以代表当前 GameSpec。下一步由你决定是否 Promote。</p>
+                <p v-else-if="session.remoteBuild?.humanReview?.decision === 'rejected'">这个 Candidate 已退回。可以记录原因并重新构建，不会影响现有 Playable。</p>
+                <p v-else-if="session.remoteBuild?.testGateStatus === 'ready'">请打开候选版本并确认核心玩法、输入和完成条件，再做人工决定。</p>
+                <p v-else>平台验证通过后，才能进入人工试玩确认。</p>
+              </div>
+            </div>
+            <textarea
+              v-if="!session.remoteBuild?.humanReview || session.remoteBuild.humanReview.decision === 'pending'"
+              v-model="humanReviewNotes"
+              class="human-play-notes"
+              :disabled="session.remoteBuild?.testGateStatus !== 'ready' || session.remoteBuild?.reviewRunning"
+              rows="2"
+              placeholder="可选：记录这次试玩观察"
+            ></textarea>
+            <p v-if="session.remoteBuild?.reviewError" class="candidate-test-error">{{ session.remoteBuild.reviewError }}</p>
+            <div v-if="!session.remoteBuild?.humanReview || session.remoteBuild.humanReview.decision === 'pending'" class="human-play-actions">
+              <button type="button" class="human-play-reject" :disabled="session.remoteBuild?.testGateStatus !== 'ready' || session.remoteBuild?.reviewRunning" @click="rejectCandidate">
+                <ThumbsDown :size="14" />退回修改
+              </button>
+              <button type="button" class="human-play-accept" :disabled="session.remoteBuild?.testGateStatus !== 'ready' || session.remoteBuild?.reviewRunning" @click="acceptCandidate">
+                <Check :size="14" />{{ session.remoteBuild?.reviewRunning ? '正在保存' : '确认试玩通过' }}
+              </button>
+            </div>
+            <div v-else-if="session.remoteBuild?.humanReview?.decision === 'accepted'" class="human-play-promote">
+              <span><Check :size="14" />人工试玩已通过</span>
+              <button type="button" :disabled="session.remoteBuild.promoteRunning" @click="promoteCandidate">
+                <Rocket :size="14" />{{ session.remoteBuild.promoteRunning ? '正在设为 Playable' : 'Promote 为当前 Playable' }}
+              </button>
+            </div>
+            <div v-else class="human-play-promote">
+              <span><ThumbsDown :size="14" />已退回，不影响当前 Playable</span>
+              <button type="button" @click="rebuildCandidate"><Hammer :size="14" />重新构建 Candidate</button>
+            </div>
+            <p v-if="session.remoteBuild?.promoteError" class="candidate-test-error">{{ session.remoteBuild.promoteError }}</p>
+          </section>
         </section>
 
         <BuildWorkspaceView v-else-if="activeTab === 'build' && isBuildTimelineMode" :phase="phase as BuildPhase" :error-code="session.remoteBuild?.errorCode" :error-message="session.remoteBuild?.errorMessage" @retry="retryBuildStage" @cancel="cancelBuildStage" />
@@ -573,6 +631,7 @@ onBeforeUnmount(() => {
           v-else-if="activeTab === 'preview' && (isBuildMode || isChangeMode)"
           :phase="phase as BuildPhase | ChangePhase"
           :playable="playable"
+          :real-preview-url="session.remoteBuild?.previewUrl"
           :release="currentRelease"
           :resource-bridge-acknowledged="resourceBridgeAcknowledged"
           :resource-pending-count="resourcePendingCount"
