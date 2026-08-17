@@ -7,7 +7,6 @@ re-applies user input and the deterministic readiness gate before persistence.
 from __future__ import annotations
 
 import json
-import os
 import re
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
@@ -40,6 +39,8 @@ class OpenAICompatibleGameDesignPlanner:
         payload = {
             "model": self.model,
             "temperature": 0.2,
+            "max_tokens": 6000,
+            "stream": False,
             "messages": [
                 {
                     "role": "system",
@@ -59,6 +60,12 @@ class OpenAICompatibleGameDesignPlanner:
                 },
             ],
         }
+        # Kimi K3 exposes a reasoning mode that the working OpenGame adapter
+        # explicitly disables for short structured turns. Keep the extension
+        # scoped to Kimi so other OpenAI-compatible providers receive standard
+        # Chat Completions fields only.
+        if self.model.lower().startswith("kimi"):
+            payload["thinking"] = {"type": "disabled"}
         request = Request(
             f"{self.base_url}/chat/completions",
             data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -69,7 +76,16 @@ class OpenAICompatibleGameDesignPlanner:
             with self._opener(request, timeout=self.timeout_seconds) as response:
                 body = json.loads(response.read().decode("utf-8"))
         except HTTPError as error:
-            raise GameDesignProviderError(f"Game Design provider returned HTTP {error.code}") from error
+            detail = ""
+            try:
+                raw = error.read().decode("utf-8", errors="replace")
+                parsed = json.loads(raw)
+                detail = str(parsed.get("error", {}).get("message", ""))
+            except (AttributeError, OSError, TypeError, ValueError):
+                detail = ""
+            detail = re.sub(r"sk-[A-Za-z0-9_-]+", "[redacted]", detail)[:400]
+            suffix = f": {detail}" if detail else ""
+            raise GameDesignProviderError(f"Game Design provider returned HTTP {error.code}{suffix}") from error
         except (URLError, TimeoutError, OSError, json.JSONDecodeError) as error:
             raise GameDesignProviderError("Game Design provider request failed") from error
         try:

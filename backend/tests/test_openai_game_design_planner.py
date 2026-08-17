@@ -1,4 +1,5 @@
 import json
+from io import BytesIO
 from urllib.error import HTTPError
 
 import pytest
@@ -73,6 +74,27 @@ def test_provider_uses_compatible_json_instruction_without_response_format_exten
     assert "response_format" not in captured
 
 
+def test_kimi_provider_request_disables_thinking_and_sets_completion_mode() -> None:
+    captured: dict = {}
+
+    def opener(request, timeout):
+        captured.update(json.loads(request.data.decode()))
+        return _Response({"choices": [{"message": {"content": "{}"}}]})
+
+    planner = OpenAICompatibleGameDesignPlanner(
+        base_url="https://example.test/v1",
+        api_key="secret",
+        model="kimi-k3",
+        opener=opener,
+    )
+    with pytest.raises(GameDesignProviderError):
+        planner.plan_turn("project", _draft(), BrainstormInput(action="start"))
+
+    assert captured["thinking"] == {"type": "disabled"}
+    assert captured["stream"] is False
+    assert captured["max_tokens"] >= 2048
+
+
 def test_provider_rejects_malformed_json() -> None:
     with pytest.raises(GameDesignProviderError, match="invalid brainstorm JSON"):
         _provider("not json").plan_turn("project", _draft(), BrainstormInput(action="start"))
@@ -92,3 +114,17 @@ def test_provider_maps_http_error_to_safe_error() -> None:
 
     with pytest.raises(GameDesignProviderError, match="HTTP 401"):
         planner.plan_turn("project", _draft(), BrainstormInput(action="start"))
+
+
+def test_provider_includes_sanitized_http_error_detail() -> None:
+    def fail(request, timeout):
+        body = b'{"error":{"message":"unsupported field sk-secret-value"}}'
+        raise HTTPError(request.full_url, 400, "bad request", {}, BytesIO(body))
+
+    planner = OpenAICompatibleGameDesignPlanner(base_url="https://example.test", api_key="secret", model="test", opener=fail)
+
+    with pytest.raises(GameDesignProviderError) as raised:
+        planner.plan_turn("project", _draft(), BrainstormInput(action="start"))
+
+    assert "unsupported field" in str(raised.value)
+    assert "sk-secret-value" not in str(raised.value)
