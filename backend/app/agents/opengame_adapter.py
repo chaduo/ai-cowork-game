@@ -299,6 +299,13 @@ def _build_prompt(request: GameBuildRequest) -> str:
     }
     spec_json = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     prompt = (
+        "MANDATORY EXECUTION ORDER: your first meaningful action must be a "
+        "write_file tool call that creates the playable index.html in the "
+        "current workspace. Do not answer with a plan, explanation, markdown, "
+        "or a code block before making that tool call; a text-only response is "
+        "a failure. After the write_file result, verify that index.html exists "
+        "in the current workspace (use a file/directory tool if needed), and "
+        "only then continue implementation or send a final response. "
         "Build a self-contained playable game from the confirmed design. "
         "Write the preview entry as index.html inside the supplied workspace. "
         "The generated index.html MUST expose a platform test hook exactly as "

@@ -61,6 +61,14 @@ def test_opengame_prompt_declares_platform_test_hook(tmp_path: Path) -> None:
     assert "completion" in prompt
 
 
+def test_opengame_prompt_requires_artifact_write_before_final_text(tmp_path: Path) -> None:
+    prompt = _build_prompt(_request(tmp_path))
+    assert "first meaningful action" in prompt
+    assert "write_file" in prompt
+    assert "text-only response is a failure" in prompt
+    assert "verify that index.html exists" in prompt
+
+
 def test_opengame_configuration_failure_is_provider_neutral(tmp_path: Path) -> None:
     async def run_once():
         adapter = OpenGameAdapter(
