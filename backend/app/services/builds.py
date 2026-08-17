@@ -245,6 +245,13 @@ class BuildService:
         if result.status == "waiting_for_input":
             if pending_event is None or result.pending_decision is None:
                 raise ValueError("waiting_for_input result is missing its pending decision event")
+            # line-115: persist the OpenGame session id the adapter captured, so a
+            # later resume (ContinuationService.resume_build) can re-drive the paused
+            # session after the blocking decision resolves. Additive column write at
+            # the existing flush; metadata is a free dict the adapter populates.
+            session_id = result.metadata.get("opengame_session_id") if result.metadata else None
+            if session_id:
+                run.opengame_session_id = session_id
             self.runs.mark_waiting_for_input(run.id, pending_event, result.pending_decision)
             self.session.flush()
             return result
