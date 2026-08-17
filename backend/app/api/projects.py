@@ -129,7 +129,11 @@ def _response(session: Session, project: Project) -> ProjectResponse:
             run_id=latest_run.id,
             status=latest_build.status,
             candidate_id=latest_candidate.id if latest_candidate else None,
-            artifact_path=latest_candidate.artifact_path if latest_candidate else latest_build.artifact_path,
+            # Build stores lifecycle/error state; artifact provenance belongs to
+            # its Candidate. Legacy or interrupted builds may have no Candidate,
+            # so expose a null artifact instead of reading a non-existent
+            # Build.artifact_path attribute.
+            artifact_path=latest_candidate.artifact_path if latest_candidate else None,
             error_code=latest_build.failure_code,
             error_message=latest_build.failure_message,
         ) if latest_build and latest_run else None),

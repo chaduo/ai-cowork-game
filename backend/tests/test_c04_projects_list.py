@@ -1,5 +1,7 @@
 import asyncio
 
+from datetime import datetime, timezone
+
 from sqlalchemy.orm import Session
 from fastapi.testclient import TestClient
 
@@ -10,6 +12,7 @@ from app.agents.fake_candidate_test_runner import FakeCandidateTestRunner
 from app.services.candidate_tests import CandidateTestService
 from tests.test_c05_design_api import draft_payload
 from tests.test_c05_gamespec_contract import valid_gamespec
+from app.models import Build, GameSpecRevision, Run
 
 
 def client_for(database_url: str) -> TestClient:
@@ -80,6 +83,49 @@ def test_projects_list_returns_derived_lifecycle_summary_for_each_project(isolat
     assert projects[1]["stage"] == "design_draft"
     assert projects[1]["current_playable"] is None
     assert projects[1]["latest_release"] is None
+
+
+def test_projects_list_handles_legacy_build_without_candidate_artifact(isolated_database) -> None:
+    client = client_for(str(isolated_database.url))
+    project = client.post(
+        "/api/v1/projects",
+        json={"name": "Garden", "original_idea": "A quiet garden game"},
+    ).json()
+
+    with Session(isolated_database) as session:
+        lifecycle = ProjectLifecycleService(session)
+        lifecycle.submit_design(project["id"], draft_payload())
+        lifecycle.confirm_design(project["id"])
+        revision = lifecycle.create_gamespec_revision(project["id"], valid_gamespec())
+        lifecycle.confirm_gamespec_revision(project["id"], revision.id)
+        now = datetime.now(timezone.utc)
+        build = Build(
+            id="legacy-build-without-candidate",
+            project_id=project["id"],
+            gamespec_revision_id=revision.id,
+            status="invalid_output",
+            failure_code="invalid_output",
+            failure_message="no playable artifact",
+            started_at=now,
+            ended_at=now,
+        )
+        run = Run(
+            id="run-legacy-build-without-candidate",
+            build_id=build.id,
+            status="invalid_output",
+            started_at=now,
+            ended_at=now,
+        )
+        session.add_all([build, run])
+        session.commit()
+
+    response = client.get("/api/v1/projects")
+
+    assert response.status_code == 200
+    latest_build = response.json()[0]["latest_build"]
+    assert latest_build["status"] == "invalid_output"
+    assert latest_build["candidate_id"] is None
+    assert latest_build["artifact_path"] is None
 
 
 def test_project_detail_returns_not_found_envelope_for_unknown_project(isolated_database) -> None:
