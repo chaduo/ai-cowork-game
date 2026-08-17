@@ -1,4 +1,4 @@
-from app.contracts.design import CreatorGameDesignDraft
+from app.contracts.design import CreatorGameDesignDraft, DesignDecision
 from app.contracts.design_brainstorm import BrainstormInput, BrainstormQuestion
 from app.services.game_design_brainstorm import (
     apply_brainstorm_input,
@@ -63,3 +63,74 @@ def test_six_turn_budget_stops_new_questions() -> None:
 
     assert select_blocking_gap(draft) is None
     assert evaluate_first_playable_readiness(draft).status in {"ready", "blocked", "not_ready"}
+
+
+def test_provider_question_ids_use_question_text_for_readiness_categories() -> None:
+    draft = _draft().model_copy(
+        update={
+            "decisions": [
+                DesignDecision(
+                    question_id="provider-question-1",
+                    question="除了移动之外，玩家是否拥有主动操作手段？",
+                    answer_id="dash",
+                    answer="冲刺",
+                    provenance="user_confirmed",
+                ),
+                DesignDecision(
+                    question_id="provider-question-2",
+                    question="被敌人抓到会发生什么、胜负如何判定？",
+                    answer_id="one-hit",
+                    answer="一击即败",
+                    provenance="user_confirmed",
+                ),
+                DesignDecision(
+                    question_id="provider-question-3",
+                    question="第一版最小配置和场景规模是什么？",
+                    answer_id="small",
+                    answer="单屏小房间",
+                    provenance="user_confirmed",
+                ),
+            ]
+        }
+    )
+
+    readiness = evaluate_first_playable_readiness(draft)
+
+    assert "player_action" not in readiness.unresolved_decisions
+    assert "completion" not in readiness.unresolved_decisions
+    assert "scope" not in readiness.unresolved_decisions
+
+
+def test_explicit_goal_in_original_idea_counts_as_user_goal() -> None:
+    draft = _draft().model_copy(
+        update={
+            "original_idea": "封闭场景中躲避敌人，坚持到倒计时结束即可获胜。",
+            "decisions": [
+                DesignDecision(
+                    question_id="provider-question-1",
+                    question="玩家是否拥有主动操作手段？",
+                    answer_id="dash",
+                    answer="冲刺",
+                    provenance="user_confirmed",
+                ),
+                DesignDecision(
+                    question_id="provider-question-2",
+                    question="被敌人抓到会发生什么、胜负如何判定？",
+                    answer_id="one-hit",
+                    answer="一击即败",
+                    provenance="user_confirmed",
+                ),
+                DesignDecision(
+                    question_id="provider-question-3",
+                    question="第一版最小配置和场景规模是什么？",
+                    answer_id="small",
+                    answer="单屏小房间",
+                    provenance="user_confirmed",
+                ),
+            ],
+        }
+    )
+
+    readiness = evaluate_first_playable_readiness(draft)
+
+    assert "goal" not in readiness.unresolved_decisions

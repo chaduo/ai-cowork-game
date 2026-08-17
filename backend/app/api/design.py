@@ -185,11 +185,14 @@ def brainstorm_design(project_id: str, payload: BrainstormInput, request: Reques
             raise ApiError("game_design_provider_failed", str(cause), [], 502) from cause
         # Provider text can propose the next question and summary, but it cannot
         # erase the reducer's user-confirmed decisions or decide readiness.
+        readiness = evaluate_first_playable_readiness(base)
+        next_question = None if readiness.first_playable_ready else planned.next_question
         merged_clarification = planned.draft.clarification.model_copy(
             update={
+                "status": "ready" if readiness.first_playable_ready else "clarifying",
                 "question_index": base.clarification.question_index,
                 "custom_input": base.clarification.custom_input,
-                "current_question": planned.next_question,
+                "current_question": next_question,
             }
         )
         merged = planned.draft.model_copy(
@@ -197,7 +200,7 @@ def brainstorm_design(project_id: str, payload: BrainstormInput, request: Reques
                 "original_idea": base.original_idea,
                 "decisions": base.decisions,
                 "clarification": merged_clarification,
-                "readiness": evaluate_first_playable_readiness(base),
+                "readiness": readiness,
             }
         )
         saved = ProjectLifecycleService(session).submit_design(project.id, merged.model_dump(mode="json", exclude_none=True))

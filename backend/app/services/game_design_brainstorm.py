@@ -31,12 +31,12 @@ def _category(question_id: str) -> str | None:
     value = question_id.lower().replace("-", "_")
     aliases = {
         "core_experience": ("core", "experience", "主体验", "核心"),
-        "player_action": ("action", "loop", "activity", "行动", "玩法"),
-        "goal": ("goal", "motivation", "purpose", "目标", "动机"),
+        "scope": ("scope", "v1", "size", "范围", "第一版", "最小", "配置", "规模"),
+        "completion": ("complete", "completion", "finish", "win", "success", "完成", "结束", "胜负", "判定", "抓到"),
+        "player_action": ("action", "loop", "activity", "行动", "玩法", "操作", "移动", "互动", "冲刺"),
+        "goal": ("goal", "motivation", "purpose", "目标", "动机", "继续", "坚持"),
         "feedback": ("feedback", "response", "reward", "反馈", "回馈"),
         "progression": ("progress", "growth", "advance", "成长", "进展"),
-        "scope": ("scope", "v1", "size", "范围", "第一版"),
-        "completion": ("complete", "completion", "finish", "win", "success", "完成", "结束"),
     }
     for category, words in aliases.items():
         if any(word in value for word in words):
@@ -49,9 +49,15 @@ def _confirmed_categories(draft: CreatorGameDesignDraft) -> set[str]:
     for decision in draft.decisions:
         if decision.provenance not in {None, "user_confirmed"}:
             continue
-        category = _category(decision.question_id)
+        category = _category(f"{decision.question_id} {decision.question}")
         if category:
             categories.add(category)
+    # The Original Idea is itself user input. When it explicitly states the
+    # player's objective, do not force a redundant AI question just because no
+    # provider-generated decision has been assigned the generic ``goal`` id.
+    idea = draft.original_idea.lower()
+    if any(token in idea for token in ("目标", "目的", "获胜", "胜利", "坚持", "生存", "逃脱", "完成")):
+        categories.add("goal")
     return categories
 
 
