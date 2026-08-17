@@ -142,6 +142,13 @@ def _turn(decoded: dict[str, Any], base: CreatorGameDesignDraft) -> BrainstormTu
         updates["summary"] = DesignSummary.model_validate(summary)
 
     next_question = decoded.get("next_question", decoded.get("nextQuestion"))
+    if next_question is None and ("question" in decoded or "prompt" in decoded):
+        next_question = {
+            "id": decoded.get("question_id"),
+            "prompt": decoded.get("prompt", decoded.get("question")),
+            "choices": decoded.get("choices", decoded.get("options", [])),
+            "input_hint": decoded.get("input_hint"),
+        }
     if next_question is None and isinstance(raw_draft.get("clarification"), dict):
         next_question = raw_draft["clarification"].get("current_question")
     parsed_question = _question(next_question, question_index=base.clarification.question_index)
@@ -167,6 +174,53 @@ class OpenAICompatibleGameDesignPlanner:
         self.model = model
         self.timeout_seconds = timeout_seconds
         self._opener = opener
+
+    def _request_json(self, payload: dict[str, Any]) -> dict[str, Any]:
+        request = Request(
+            f"{self.base_url}/chat/completions",
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with self._opener(request, timeout=self.timeout_seconds) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except HTTPError as error:
+            detail = ""
+            try:
+                raw = error.read().decode("utf-8", errors="replace")
+                parsed = json.loads(raw)
+                detail = str(parsed.get("error", {}).get("message", ""))
+            except (AttributeError, OSError, TypeError, ValueError):
+                detail = ""
+            detail = re.sub(r"sk-[A-Za-z0-9_-]+", "[redacted]", detail)[:400]
+            suffix = f": {detail}" if detail else ""
+            raise GameDesignProviderError(f"Game Design provider returned HTTP {error.code}{suffix}") from error
+        except (URLError, TimeoutError, OSError, json.JSONDecodeError) as error:
+            raise GameDesignProviderError("Game Design provider request failed") from error
+
+    @staticmethod
+    def _repair_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        repair = json.loads(json.dumps(payload))
+        repair["max_tokens"] = min(int(repair.get("max_tokens", 1800)), 1800)
+        repair["messages"] = [
+            {
+                "role": "system",
+                "content": (
+                    "上一次输出无法解析。现在只输出一个合法 JSON 对象，不能有 Markdown、解释文字或思考过程。"
+                    "必须包含 next_question 对象；除非输入中的 readiness.first_playable_ready=true，否则 next_question 不得为 null。"
+                    "draft 可省略。"
+                ),
+            },
+            repair["messages"][1],
+        ]
+        return repair
+
+    @staticmethod
+    def _parse_turn(body: dict[str, Any], draft: CreatorGameDesignDraft) -> BrainstormTurn:
+        content = body["choices"][0]["message"]["content"]
+        decoded = _decode_json(_content_text(content))
+        return _turn(decoded, draft)
 
     def plan_turn(self, project_id: str, draft: CreatorGameDesignDraft, user_input: BrainstormInput) -> BrainstormTurn:
         if not self.base_url or not self.api_key:
@@ -205,31 +259,11 @@ class OpenAICompatibleGameDesignPlanner:
         # Chat Completions fields only.
         if self.model.lower().startswith("kimi"):
             payload["thinking"] = {"type": "disabled"}
-        request = Request(
-            f"{self.base_url}/chat/completions",
-            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-            method="POST",
-        )
+
         try:
-            with self._opener(request, timeout=self.timeout_seconds) as response:
-                body = json.loads(response.read().decode("utf-8"))
-        except HTTPError as error:
-            detail = ""
+            return self._parse_turn(self._request_json(payload), draft)
+        except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as first_error:
             try:
-                raw = error.read().decode("utf-8", errors="replace")
-                parsed = json.loads(raw)
-                detail = str(parsed.get("error", {}).get("message", ""))
-            except (AttributeError, OSError, TypeError, ValueError):
-                detail = ""
-            detail = re.sub(r"sk-[A-Za-z0-9_-]+", "[redacted]", detail)[:400]
-            suffix = f": {detail}" if detail else ""
-            raise GameDesignProviderError(f"Game Design provider returned HTTP {error.code}{suffix}") from error
-        except (URLError, TimeoutError, OSError, json.JSONDecodeError) as error:
-            raise GameDesignProviderError("Game Design provider request failed") from error
-        try:
-            content = body["choices"][0]["message"]["content"]
-            decoded = _decode_json(_content_text(content))
-            return _turn(decoded, draft)
-        except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as error:
-            raise GameDesignProviderError("Game Design provider returned invalid brainstorm JSON") from error
+                return self._parse_turn(self._request_json(self._repair_payload(payload)), draft)
+            except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as second_error:
+                raise GameDesignProviderError("Game Design provider returned invalid brainstorm JSON") from second_error

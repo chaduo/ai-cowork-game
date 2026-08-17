@@ -1,7 +1,10 @@
+import json
+
 from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.main import create_app
+from app.agents.openai_game_design_planner import OpenAICompatibleGameDesignPlanner
 
 
 def _client(database_url: str, *, planner=None) -> TestClient:
@@ -100,3 +103,67 @@ def test_first_playable_readiness_allows_confirm_after_five_core_decisions(isola
     confirmed = client.post(f"/api/v1/projects/{project['id']}/design/confirm")
     assert confirmed.status_code == 200
     assert confirmed.json()["status"] == "confirmed"
+
+
+def test_real_brainstorm_route_recovers_one_invalid_follow_up_response(isolated_database) -> None:
+    class Response:
+        def __init__(self, payload: dict):
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return json.dumps(self.payload).encode()
+
+    responses = [
+        Response(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"next_question":{"id":"q1","prompt":"玩家最想获得什么体验？","choices":[]}}'
+                        }
+                    }
+                ]
+            }
+        ),
+        Response({"choices": [{"message": {"content": "不是 JSON"}}]}),
+        Response(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"next_question":{"id":"q2","prompt":"玩家下一步做什么？","choices":[]}}'
+                        }
+                    }
+                ]
+            }
+        ),
+    ]
+
+    def opener(request, timeout):
+        return responses.pop(0)
+
+    planner = OpenAICompatibleGameDesignPlanner(
+        base_url="https://example.test/v1",
+        api_key="secret",
+        model="test-model",
+        opener=opener,
+    )
+    client = _client(str(isolated_database.url), planner=planner)
+    project = _project(client, key="real-brainstorm-route", idea="探索一座旧灯塔")
+
+    first = client.post(f"/api/v1/projects/{project['id']}/design/brainstorm", json={"action": "start"})
+    assert first.status_code == 200
+    question = first.json()["next_question"]
+    second = client.post(
+        f"/api/v1/projects/{project['id']}/design/brainstorm",
+        json={"action": "answer", "question_id": question["id"], "answer": "探索和发现"},
+    )
+
+    assert second.status_code == 200
+    assert second.json()["next_question"]["id"] == "q2"

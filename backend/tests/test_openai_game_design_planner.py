@@ -159,10 +159,10 @@ def test_provider_prompt_requests_incremental_brainstorm_payload() -> None:
 
 
 def test_kimi_provider_request_disables_thinking_and_sets_completion_mode() -> None:
-    captured: dict = {}
+    captured: list[dict] = []
 
     def opener(request, timeout):
-        captured.update(json.loads(request.data.decode()))
+        captured.append(json.loads(request.data.decode()))
         return _Response({"choices": [{"message": {"content": "{}"}}]})
 
     planner = OpenAICompatibleGameDesignPlanner(
@@ -174,15 +174,51 @@ def test_kimi_provider_request_disables_thinking_and_sets_completion_mode() -> N
     with pytest.raises(GameDesignProviderError):
         planner.plan_turn("project", _draft(), BrainstormInput(action="start"))
 
-    assert captured["thinking"] == {"type": "disabled"}
-    assert captured["stream"] is False
-    assert captured["max_tokens"] >= 2048
-    assert captured["temperature"] == 1
+    assert captured[0]["thinking"] == {"type": "disabled"}
+    assert captured[0]["stream"] is False
+    assert captured[0]["max_tokens"] >= 2048
+    assert captured[0]["temperature"] == 1
 
 
 def test_provider_rejects_malformed_json() -> None:
     with pytest.raises(GameDesignProviderError, match="invalid brainstorm JSON"):
         _provider("not json").plan_turn("project", _draft(), BrainstormInput(action="start"))
+
+
+def test_provider_repairs_one_invalid_turn_response() -> None:
+    responses = [
+        _Response({"choices": [{"message": {"content": "我先想想，但没有按 JSON 返回"}}]}),
+        _Response(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"next_question":{"id":"q2","prompt":"玩家下一步做什么？","choices":[]}}'
+                        }
+                    }
+                ]
+            }
+        ),
+    ]
+    calls: list[dict] = []
+
+    def opener(request, timeout):
+        calls.append(json.loads(request.data.decode()))
+        return responses.pop(0)
+
+    planner = OpenAICompatibleGameDesignPlanner(
+        base_url="https://example.test/v1",
+        api_key="secret",
+        model="test-model",
+        opener=opener,
+    )
+
+    turn = planner.plan_turn("project", _draft(), BrainstormInput(action="answer", question_id="q1", answer="探索"))
+
+    assert len(calls) == 2
+    assert "无法解析" in calls[1]["messages"][0]["content"]
+    assert turn.next_question is not None
+    assert turn.next_question.id == "q2"
 
 
 def test_provider_requires_credentials() -> None:
