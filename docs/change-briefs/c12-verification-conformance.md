@@ -56,6 +56,11 @@
   `CRITICAL_FAILURE`, or `INVALID` from platform-owned Build Check, Browser
   Smoke, Core Gameplay Acceptance, safe artifact references, and the
   `window.__GAME_TEST__` hook.
+- Production `CANDIDATE_TEST_PROVIDER=chrome` now uses
+  `ChromeCandidateTestRunner`, which launches local Chrome through the Chrome
+  DevTools Protocol, captures load/console/exception evidence, dispatches a
+  real keyboard input, and executes versioned `window.__GAME_TEST__` checks.
+  Fake runner selection is limited to explicit test `Settings` injection.
 - Runtime-only PASS, contradictory evidence, missing checks, unsafe artifact
   references and unvalidated hooks never mark a Candidate ready.
 - Repair ancestry permits at most three repair rounds; every replacement is a

@@ -1,9 +1,10 @@
-from app.agents.candidate_test_runner import EVIDENCE_GROUPS as _GROUPS
-from app.agents.candidate_test_runner import REQUIRED_EVIDENCE
-from app.agents.candidate_test_runner import CandidateTestRunner
+from app.agents.candidate_test_runner import CandidateTestRunner, EVIDENCE_GROUPS, REQUIRED_EVIDENCE
 from app.contracts.game_agent import Diagnostic
 from app.contracts.test_report import CandidateTestEvidence, RuntimeTestResult
 from app.models import BuildCandidate
+
+
+_GROUPS = EVIDENCE_GROUPS
 
 
 class FakeCandidateTestRunner(CandidateTestRunner):

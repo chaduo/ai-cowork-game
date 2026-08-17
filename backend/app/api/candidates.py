@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.agents.fake_candidate_test_runner import FakeCandidateTestRunner
+from app.agents.chrome_browser_runner import ChromeCandidateTestRunner
 from app.errors import ApiError
 from app.models import BuildCandidate, TestReport
 from app.services.candidate_tests import CandidateTestService
@@ -53,6 +53,7 @@ class CandidateResponse(BaseModel):
     parent_candidate_id: str | None
     attempt: int
     repair_round: int
+    source_playable_version_id: str | None = None
     report: TestReportResponse | None = None
 
 
@@ -103,6 +104,7 @@ def _candidate_response(candidate: BuildCandidate, report: TestReport | None = N
         parent_candidate_id=candidate.parent_candidate_id,
         attempt=candidate.attempt,
         repair_round=candidate.repair_round,
+        source_playable_version_id=candidate.source_playable_version_id,
         report=_report_response(report) if report else None,
     )
 
@@ -110,7 +112,16 @@ def _candidate_response(candidate: BuildCandidate, report: TestReport | None = N
 def _service(request: Request, session: Session) -> CandidateTestService:
     runner = getattr(request.app.state, "candidate_test_runner", None)
     if runner is None:
-        runner = FakeCandidateTestRunner("pass")
+        provider = getattr(request.app.state, "candidate_test_provider", "unconfigured")
+        if provider == "chrome":
+            settings = request.app.state.settings
+            runner = ChromeCandidateTestRunner(
+                session,
+                executable=settings.chrome_executable,
+                timeout_seconds=settings.chrome_timeout_seconds,
+            )
+        else:
+            raise RuntimeError("candidate test provider is not configured")
     return CandidateTestService(session, runner)
 
 

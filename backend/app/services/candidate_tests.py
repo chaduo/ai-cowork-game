@@ -9,16 +9,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents.candidate_test_runner import CandidateTestRunner
-from app.agents.fake_candidate_test_runner import REQUIRED_EVIDENCE
+from app.agents.candidate_test_runner import PHASER_TEST_HOOK, REQUIRED_EVIDENCE
 from app.contracts.test_report import CandidateTestEvidence, RuntimeTestResult
 from app.models import BuildCandidate, TestEvidence, TestReport, utc_now
 
 
 MAX_REPAIR_ROUNDS = 3
 BUILD_CHECK = "build_check"
-PHASER_TEST_HOOK = "window.__GAME_TEST__"
-
-
 class CandidateTestService:
     def __init__(self, session: Session, runner: CandidateTestRunner) -> None:
         self.session = session

@@ -78,6 +78,9 @@ const activeOrder: Record<BuildPhase, number> = {
   auto_fixing: 5,
   validating_complete: 5,
   playable_ready: 6,
+  // A Candidate means provider build output exists; platform validation is a
+  // separate gate and must not be presented as already completed.
+  candidate_ready: 5,
 }
 
 export function getMilestoneStatus(id: BuildMilestoneId, phase: BuildPhase): MilestoneStatus {

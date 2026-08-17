@@ -1,9 +1,13 @@
+import asyncio
+
 from sqlalchemy.orm import Session
 from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.main import create_app
 from app.services.lifecycle import ProjectLifecycleService
+from app.agents.fake_candidate_test_runner import FakeCandidateTestRunner
+from app.services.candidate_tests import CandidateTestService
 from tests.test_c05_design_api import draft_payload
 from tests.test_c05_gamespec_contract import valid_gamespec
 
@@ -41,13 +45,13 @@ def test_projects_list_returns_derived_lifecycle_summary_for_each_project(isolat
         revision = service.create_gamespec_revision(first["id"], valid_gamespec())
         service.confirm_gamespec_revision(first["id"], revision.id)
         build = service.start_build(first["id"])
-        candidate = service.finish_build(build.id, "succeeded", summary="ready", artifact_path="artifacts/v1")
+        candidate = service.finish_build(build.id, "succeeded", summary="ready", artifact_path="dist/index.html")
+        candidate.artifact_checksum = "a" * 64
+        asyncio.run(CandidateTestService(session, FakeCandidateTestRunner("pass")).test_candidate(candidate.id))
+        service.record_human_play_review(candidate.id, decision="accepted")
         playable = service.promote_candidate(
             candidate.id,
-            test_report_id="report-1",
-            verdict="pass",
             git_commit="abc123",
-            artifact_checksum="sha256:one",
         )
         release = service.publish_version(playable.id)
         playable_id = playable.id
@@ -64,7 +68,7 @@ def test_projects_list_returns_derived_lifecycle_summary_for_each_project(isolat
     assert published["current_playable"] == {
         "id": playable_id,
         "number": 1,
-        "artifact_path": "artifacts/v1",
+        "artifact_path": "dist/index.html",
     }
     assert published["latest_release"] == {
         "id": release_id,

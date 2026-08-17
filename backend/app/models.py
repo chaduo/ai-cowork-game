@@ -213,6 +213,10 @@ class BuildCandidate(Base):
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), nullable=False)
     build_id: Mapped[str] = mapped_column(ForeignKey("builds.id"), nullable=False, unique=True)
     build_context_id: Mapped[str | None] = mapped_column(ForeignKey("build_contexts.id"), nullable=True)
+    source_playable_version_id: Mapped[str | None] = mapped_column(
+        ForeignKey("playable_versions.id"),
+        nullable=True,
+    )
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     test_gate_status: Mapped[str] = mapped_column(String(20), nullable=False, default="untested")
     parent_candidate_id: Mapped[str | None] = mapped_column(ForeignKey("build_candidates.id"), nullable=True)
@@ -260,6 +264,21 @@ class TestEvidence(Base):
     details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     report: Mapped[TestReport] = relationship(back_populates="evidence")
+
+
+class HumanPlayReview(Base):
+    __tablename__ = "human_play_reviews"
+    __table_args__ = (UniqueConstraint("candidate_id", name="uq_human_play_review_candidate"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    candidate_id: Mapped[str] = mapped_column(ForeignKey("build_candidates.id"), nullable=False)
+    decision: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    amendment_status: Mapped[str] = mapped_column(String(20), nullable=False, default="not_required")
+    drift_status: Mapped[str] = mapped_column(String(20), nullable=False, default="clear")
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
 
 
 class PlayableVersion(Base):

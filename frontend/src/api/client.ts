@@ -24,6 +24,22 @@ export interface ProjectResponse {
     status: string
     playable_version_id: string
   } | null
+  latest_build: {
+    build_id: string
+    run_id: string
+    status: string
+    candidate_id: string | null
+    artifact_path: string | null
+    error_code: string | null
+    error_message: string | null
+  } | null
+  candidate_review: {
+    candidate_id: string
+    build_id: string
+    run_id: string
+    artifact_path: string
+    test_gate_status: string
+  } | null
 }
 
 export interface ApiErrorBody {
@@ -57,6 +73,66 @@ export interface GameSpecResponse {
   source_design_revision_id: string | null
   validation_errors: Array<Record<string, unknown>>
   spec: CreatorGameSpec
+}
+
+export interface BuildResponse {
+  build_id: string
+  run_id: string
+  project_id: string
+  status: string
+  attempt: number
+  parent_build_id: string | null
+  gamespec_revision_id: string
+  baseline_playable_version_id: string | null
+  operation: string
+  request_text: string
+  started_at: string | null
+  ended_at: string | null
+  candidate_id: string | null
+  artifact_path: string | null
+  diagnostics: Array<Record<string, unknown>>
+  error_code: string | null
+  error_message: string | null
+  build_context_id: string | null
+  build_context_hash: string | null
+}
+
+export interface CandidateEvidenceResponse {
+  id: string
+  kind: string
+  status: string
+  source: string
+  severity: string
+  expected: string
+  observed: string
+  artifact_ref: string
+  details: Record<string, unknown>
+}
+
+export interface CandidateTestReportResponse {
+  id: string
+  candidate_id: string
+  runtime_verdict: string
+  platform_verdict: string
+  status: string
+  severity: string
+  summary: string
+  diagnostics: Array<Record<string, unknown>>
+  created_at: string
+  evidence: CandidateEvidenceResponse[]
+}
+
+export interface CandidateResponse {
+  candidate_id: string
+  project_id: string
+  build_id: string
+  build_status: string
+  test_gate_status: string
+  parent_candidate_id: string | null
+  attempt: number
+  repair_round: number
+  source_playable_version_id: string | null
+  report: CandidateTestReportResponse | null
 }
 
 export class ApiClientError extends Error {
@@ -134,4 +210,44 @@ export function saveProjectGameSpec(projectId: string, spec: CreatorGameSpec): P
 
 export function confirmProjectGameSpec(projectId: string): Promise<GameSpecResponse> {
   return request<GameSpecResponse>(`/v1/projects/${encodeURIComponent(projectId)}/gamespec/confirm`, { method: 'POST' })
+}
+
+export function createProjectBuild(
+  projectId: string,
+  input: { buildId: string; runId: string; requestText?: string },
+): Promise<BuildResponse> {
+  return request<BuildResponse>(`/v1/projects/${encodeURIComponent(projectId)}/builds`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      build_id: input.buildId,
+      run_id: input.runId,
+      operation: 'create',
+      request_text: input.requestText ?? '根据已确认的 GameSpec 创建第一个可试玩版本。',
+    }),
+  })
+}
+
+export function getProjectBuild(buildId: string): Promise<BuildResponse> {
+  return request<BuildResponse>(`/v1/builds/${encodeURIComponent(buildId)}`)
+}
+
+export function cancelProjectBuild(buildId: string): Promise<BuildResponse> {
+  return request<BuildResponse>(`/v1/builds/${encodeURIComponent(buildId)}/cancel`, { method: 'POST' })
+}
+
+export function testBuildCandidate(candidateId: string): Promise<CandidateResponse> {
+  return request<CandidateResponse>(`/v1/candidates/${encodeURIComponent(candidateId)}/test`, { method: 'POST' })
+}
+
+export function getBuildCandidateTestReport(candidateId: string): Promise<CandidateResponse> {
+  return request<CandidateResponse>(`/v1/candidates/${encodeURIComponent(candidateId)}/test-report`)
+}
+
+export function linkBuildCandidateRepair(parentCandidateId: string, replacementCandidateId: string): Promise<CandidateResponse> {
+  return request<CandidateResponse>(`/v1/candidates/${encodeURIComponent(parentCandidateId)}/repair-link`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ replacement_candidate_id: replacementCandidateId }),
+  })
 }

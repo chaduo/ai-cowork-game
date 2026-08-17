@@ -563,6 +563,19 @@ output: stdout, stderr, exit_code, process_status, duration
 - Repair links a new C11 retry Candidate to a failed/invalid parent for at most three repair rounds without overwriting the parent; C12 never changes `current_playable_version_id`, creates PlayableVersion, publishes Release, or adds Workspace UI.
 - C12 corrective service/API/schema tests cover 20 focused cases; full backend regression (122 tests), migration repeatability and frontend build are recorded in the verification artifact.
 
+**C10/C12 real runtime correction (2026-08-17)**
+
+- Production `get_settings()` selects `OpenGameAdapter` and the Chrome browser
+  verifier; missing configuration fails closed instead of falling back to Fake.
+- `OpenGameAdapter` resolves the real `opengame` binary, carries artifact
+  checksums into the Candidate, and requires the standard
+  `window.__GAME_TEST__` contract in its build prompt.
+- `ChromeCandidateTestRunner` launches a real local Chrome through the Chrome
+  DevTools Protocol, records load/console/exception evidence, dispatches a
+  keyboard input, executes the hook checks and feeds platform-owned evidence to
+  `CandidateTestService`.
+- Manual verification procedure: `docs/development/C10_C12_REAL_RUNTIME.md`.
+
 ### C13 — `runtime-workspace-isolation`
 
 **Goal**

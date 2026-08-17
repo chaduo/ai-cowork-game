@@ -27,6 +27,8 @@ EVIDENCE_GROUPS: dict[str, str] = {
     "phaser_hook": "core_gameplay",
 }
 
+PHASER_TEST_HOOK = "window.__GAME_TEST__"
+
 
 class CandidateTestRunner(Protocol):
     async def run(self, candidate: BuildCandidate) -> RuntimeTestResult:

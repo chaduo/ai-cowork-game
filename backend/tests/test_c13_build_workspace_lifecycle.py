@@ -56,6 +56,23 @@ def test_execute_build_prepares_isolated_workspace(isolated_database, tmp_path: 
         assert Path(run.workspace_path).is_dir()
 
 
+def test_restart_recovery_keeps_succeeded_candidate_workspace(isolated_database, tmp_path: Path) -> None:
+    with Session(isolated_database) as session:
+        project = confirmed_project(session)
+        service = _service(session, tmp_path)
+        job = service.create_build(project.id, build_id="b-restart-ok", run_id="run-restart-ok")
+        asyncio.run(service.execute_build(job.build_id))
+        run = _run_for(session, job.build_id)
+        workspace_path = Path(run.workspace_path or "")
+
+        service.recover_orphaned_jobs()
+        session.flush()
+
+        assert run.status == "succeeded"
+        assert run.workspace_status == "prepared"
+        assert workspace_path.is_dir()
+
+
 @pytest.mark.parametrize("outcome,status", [
     ({"create": "failed"}, "failed"),
     ({"create": "timed_out"}, "timed_out"),

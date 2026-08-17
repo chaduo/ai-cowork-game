@@ -9,6 +9,7 @@ import { createResourceCandidates as createResourceCandidatesFixture } from '../
 import { matchResourcesToSpec } from './resourceMatching'
 import type { ReleaseDraft, ReleasePhase, ReleaseRecord } from '../components/workspace/releaseTypes'
 import type { CreatorGameSpec } from '../contracts/creatorGameSpec'
+import { ApiClientError, cancelProjectBuild, createProjectBuild, getBuildCandidateTestReport, getProjectBuild, linkBuildCandidateRepair, testBuildCandidate, type BuildResponse, type CandidateTestReportResponse } from '../api/client'
 import type {
   CoworkMessage,
   GameSpecModel,
@@ -20,6 +21,7 @@ import type {
 
 export type ProjectSession = {
   id: string
+  backendProjectId: string | null
   createdAt: number
   updatedAt: number
   design: ConfirmedGameDesign
@@ -44,6 +46,21 @@ export type ProjectSession = {
   gamespecStatus: 'missing' | 'draft' | 'confirmed' | 'superseded'
   canonicalGameSpec: CreatorGameSpec | null
   gamespecRevisionId: string | null
+  remoteBuild: RemoteBuildState | null
+}
+
+export type RemoteBuildState = {
+  buildId: string
+  runId: string
+  status: string
+  candidateId: string | null
+  artifactPath: string | null
+  errorCode: string | null
+  errorMessage: string | null
+  testGateStatus?: string
+  testReport?: CandidateTestReportResponse | null
+  testRunning?: boolean
+  testError?: string | null
 }
 
 export type ProjectStore = {
@@ -335,6 +352,7 @@ export function createProjectSession(design: ConfirmedGameDesign, projectId?: st
   const now = Date.now()
   return {
     id: projectId ?? `project-${now}-${projectCounter}`,
+    backendProjectId: projectId ?? null,
     createdAt: now,
     updatedAt: now,
     design,
@@ -370,6 +388,7 @@ export function createProjectSession(design: ConfirmedGameDesign, projectId?: st
     gamespecStatus: 'missing',
     canonicalGameSpec: null,
     gamespecRevisionId: null,
+    remoteBuild: null,
   }
 }
 
@@ -383,8 +402,9 @@ function restoreProjectStore(): void {
 
     for (const snapshot of parsed.projects) {
       if (!snapshot || typeof snapshot !== 'object' || typeof snapshot.id !== 'string' || !snapshot.design) continue
-      const session = createProjectSession(snapshot.design, snapshot.id)
+      const session = createProjectSession(snapshot.design)
       Object.assign(session, snapshot)
+      session.backendProjectId = typeof snapshot.backendProjectId === 'string' ? snapshot.backendProjectId : null
       projectStore.projects.push(session)
     }
   } catch {
@@ -409,6 +429,13 @@ export function openProject(id: string): ProjectSession | null {
   return session
 }
 
+export function bindBackendProject(projectId: string): void {
+  const session = getProject(projectId)
+  if (!session) return
+  session.backendProjectId = projectId
+  touchProject(session)
+}
+
 export function setProjectDesignStatus(projectId: string, status: ProjectSession['designStatus']): void {
   const session = getProject(projectId)
   if (!session) return
@@ -426,6 +453,185 @@ export function setProjectGameSpecState(
   session.gamespecRevisionId = state.revisionId
   session.canonicalGameSpec = state.spec
   touchProject(session)
+}
+
+const REMOTE_BUILD_TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'cancelled', 'timed_out', 'invalid_output', 'unsupported'])
+const remoteBuildPollers = new Map<string, number>()
+
+function clearRemoteBuildPoller(projectId: string): void {
+  const timer = remoteBuildPollers.get(projectId)
+  if (timer !== undefined) window.clearInterval(timer)
+  remoteBuildPollers.delete(projectId)
+}
+
+function applyRemoteBuildResponse(projectId: string, response: BuildResponse): void {
+  const session = getProject(projectId)
+  if (!session) return
+  applyRemoteBuildState(session, {
+    buildId: response.build_id,
+    runId: response.run_id,
+    status: response.status,
+    candidateId: response.candidate_id,
+    artifactPath: response.artifact_path,
+    errorCode: response.error_code,
+    errorMessage: response.error_message,
+  })
+}
+
+function applyRemoteBuildState(session: ProjectSession, state: RemoteBuildState): void {
+  session.remoteBuild = state
+  if (state.status === 'succeeded' && state.candidateId) {
+    // A successful build creates a Candidate only. Promotion remains a Human Gate.
+    session.phase = 'candidate_ready'
+    clearRemoteBuildPoller(session.id)
+  } else if (REMOTE_BUILD_TERMINAL_STATUSES.has(state.status)) {
+    session.phase = 'build_error'
+    clearRemoteBuildPoller(session.id)
+  } else {
+    session.phase = 'building_foundation'
+  }
+  touchProject(session)
+}
+
+export function hydrateRemoteBuild(projectId: string, state: RemoteBuildState): void {
+  const session = getProject(projectId)
+  if (!session) return
+  applyRemoteBuildState(session, state)
+}
+
+export async function refreshRemoteBuild(projectId: string): Promise<void> {
+  const session = getProject(projectId)
+  const buildId = session?.remoteBuild?.buildId
+  if (!session || !session.backendProjectId || !buildId) return
+  try {
+    const response = await getProjectBuild(buildId)
+    applyRemoteBuildResponse(projectId, response)
+  } catch {
+    // A just-created build may not be visible until its first transaction commits.
+    // Keep the existing working state and let the next poll retry.
+  }
+}
+
+function startRemoteBuildPolling(projectId: string): void {
+  if (remoteBuildPollers.has(projectId)) return
+  const timer = window.setInterval(() => {
+    void refreshRemoteBuild(projectId)
+  }, 2000)
+  remoteBuildPollers.set(projectId, timer)
+}
+
+export async function startRemoteBuild(projectId: string): Promise<void> {
+  const session = getProject(projectId)
+  if (!session?.backendProjectId) return
+  const existing = session.remoteBuild
+  if (existing && !REMOTE_BUILD_TERMINAL_STATUSES.has(existing.status)) return
+
+  const buildId = existing?.buildId ?? crypto.randomUUID()
+  const runId = existing?.runId ?? `run-${buildId}`
+  session.remoteBuild = {
+    buildId,
+    runId,
+    status: 'running',
+    candidateId: null,
+    artifactPath: null,
+    errorCode: null,
+    errorMessage: null,
+  }
+  session.phase = 'build_starting'
+  touchProject(session)
+  startRemoteBuildPolling(projectId)
+
+  try {
+    const response = await createProjectBuild(session.backendProjectId, {
+      buildId,
+      runId,
+      requestText: '根据已确认的 GameSpec 创建第一个可试玩版本，并生成真实 index.html。',
+    })
+    applyRemoteBuildResponse(projectId, response)
+  } catch (cause) {
+    const current = getProject(projectId)
+    if (!current) return
+    current.remoteBuild = {
+      buildId,
+      runId,
+      status: 'failed',
+      candidateId: null,
+      artifactPath: null,
+      errorCode: cause instanceof ApiClientError ? cause.code : 'build_request_failed',
+      errorMessage: cause instanceof ApiClientError ? cause.message : '真实 Build 请求失败。',
+    }
+    current.phase = 'build_error'
+    clearRemoteBuildPoller(projectId)
+    touchProject(current)
+  }
+}
+
+export async function cancelRemoteBuild(projectId: string): Promise<void> {
+  const session = getProject(projectId)
+  const buildId = session?.remoteBuild?.buildId
+  if (!session?.backendProjectId || !buildId) return
+  try {
+    const response = await cancelProjectBuild(buildId)
+    applyRemoteBuildResponse(projectId, response)
+  } catch (cause) {
+    session.messages.push({
+      id: `build-cancel-error-${Date.now()}`,
+      role: 'system',
+      text: cause instanceof ApiClientError ? cause.message : '暂时无法取消真实 Build，请稍后重试。',
+    })
+    touchProject(session)
+  }
+}
+
+export async function testRemoteCandidate(projectId: string): Promise<void> {
+  const session = getProject(projectId)
+  const candidateId = session?.remoteBuild?.candidateId
+  if (!session?.remoteBuild || !candidateId || session.remoteBuild.testRunning) return
+  session.remoteBuild.testRunning = true
+  session.remoteBuild.testError = null
+  touchProject(session)
+  try {
+    const response = await testBuildCandidate(candidateId)
+    session.remoteBuild.testGateStatus = response.test_gate_status
+    session.remoteBuild.testReport = response.report
+  } catch (cause) {
+    session.remoteBuild.testError = cause instanceof ApiClientError ? cause.message : '平台验证暂时无法完成。'
+  } finally {
+    session.remoteBuild.testRunning = false
+    touchProject(session)
+  }
+}
+
+export async function refreshRemoteCandidateTest(projectId: string): Promise<void> {
+  const session = getProject(projectId)
+  const candidateId = session?.remoteBuild?.candidateId
+  if (!session?.remoteBuild || !candidateId || session.remoteBuild.testGateStatus === 'untested') return
+  try {
+    const response = await getBuildCandidateTestReport(candidateId)
+    session.remoteBuild.testGateStatus = response.test_gate_status
+    session.remoteBuild.testReport = response.report
+    session.remoteBuild.testError = null
+  } catch (cause) {
+    session.remoteBuild.testError = cause instanceof ApiClientError ? cause.message : '暂时无法读取平台验证证据。'
+  }
+  touchProject(session)
+}
+
+export async function rebuildRemoteCandidate(projectId: string): Promise<void> {
+  const session = getProject(projectId)
+  const parentCandidateId = session?.remoteBuild?.candidateId
+  if (!session?.backendProjectId || !parentCandidateId) return
+  session.remoteBuild = null
+  await startRemoteBuild(projectId)
+  const updated = getProject(projectId)
+  const replacementCandidateId = updated?.remoteBuild?.candidateId
+  if (!updated?.remoteBuild || updated.remoteBuild.status !== 'succeeded' || !replacementCandidateId) return
+  try {
+    await linkBuildCandidateRepair(parentCandidateId, replacementCandidateId)
+  } catch (cause) {
+    updated.remoteBuild.testError = cause instanceof ApiClientError ? cause.message : '新 Candidate 已生成，但暂时无法记录修复来源。'
+    touchProject(updated)
+  }
 }
 
 type TimerJobKey =

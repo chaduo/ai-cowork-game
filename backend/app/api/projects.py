@@ -5,7 +5,7 @@ from fastapi import APIRouter, Header, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Build, BuildCandidate, GameDesign, GameSpecRevision, PlayableVersion, Project, Release
+from app.models import Build, BuildCandidate, GameDesign, GameSpecRevision, PlayableVersion, Project, Release, Run
 from app.errors import ApiError
 from app.services.lifecycle import ProjectLifecycleService, ProjectStage
 
@@ -15,16 +15,6 @@ router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
 class CreateProjectRequest(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     original_idea: str = Field(min_length=1)
-
-
-class ProjectResponse(BaseModel):
-    id: str
-    name: str
-    original_idea: str
-    stage: ProjectStage
-    updated_at: datetime
-    current_playable: "PlayableSummary | None" = None
-    latest_release: "ReleaseSummary | None" = None
 
 
 class PlayableSummary(BaseModel):
@@ -40,6 +30,36 @@ class ReleaseSummary(BaseModel):
     playable_version_id: str
 
 
+class LatestBuildSummary(BaseModel):
+    build_id: str
+    run_id: str
+    status: str
+    candidate_id: str | None = None
+    artifact_path: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+
+
+class CandidateReviewSummary(BaseModel):
+    candidate_id: str
+    build_id: str
+    run_id: str
+    artifact_path: str
+    test_gate_status: str
+
+
+class ProjectResponse(BaseModel):
+    id: str
+    name: str
+    original_idea: str
+    stage: ProjectStage
+    updated_at: datetime
+    current_playable: PlayableSummary | None = None
+    latest_release: ReleaseSummary | None = None
+    latest_build: LatestBuildSummary | None = None
+    candidate_review: CandidateReviewSummary | None = None
+
+
 def _response(session: Session, project: Project) -> ProjectResponse:
     current_playable = session.get(PlayableVersion, project.current_playable_version_id) if project.current_playable_version_id else None
     latest_release = session.scalar(
@@ -47,6 +67,29 @@ def _response(session: Session, project: Project) -> ProjectResponse:
         .where(Release.project_id == project.id)
         .order_by(Release.number.desc())
     )
+    latest_build = session.scalar(
+        select(Build)
+        .where(Build.project_id == project.id)
+        .order_by(Build.created_at.desc())
+    )
+    latest_run = session.scalar(
+        select(Run)
+        .where(Run.build_id == latest_build.id)
+        .order_by(Run.created_at.desc())
+    ) if latest_build else None
+    latest_candidate = session.scalar(
+        select(BuildCandidate).where(BuildCandidate.build_id == latest_build.id)
+    ) if latest_build else None
+    review_candidate = session.scalar(
+        select(BuildCandidate)
+        .where(BuildCandidate.project_id == project.id, BuildCandidate.status == "succeeded")
+        .order_by(BuildCandidate.created_at.desc())
+    )
+    review_run = session.scalar(
+        select(Run)
+        .where(Run.build_id == review_candidate.build_id)
+        .order_by(Run.created_at.desc())
+    ) if review_candidate else None
     timestamps = [project.updated_at]
     for model, timestamp_column in (
         (GameDesign, GameDesign.updated_at),
@@ -81,6 +124,22 @@ def _response(session: Session, project: Project) -> ProjectResponse:
             status=latest_release.status,
             playable_version_id=latest_release.playable_version_id,
         ) if latest_release else None),
+        latest_build=(LatestBuildSummary(
+            build_id=latest_build.id,
+            run_id=latest_run.id,
+            status=latest_build.status,
+            candidate_id=latest_candidate.id if latest_candidate else None,
+            artifact_path=latest_candidate.artifact_path if latest_candidate else latest_build.artifact_path,
+            error_code=latest_build.failure_code,
+            error_message=latest_build.failure_message,
+        ) if latest_build and latest_run else None),
+        candidate_review=(CandidateReviewSummary(
+            candidate_id=review_candidate.id,
+            build_id=review_candidate.build_id,
+            run_id=review_run.id,
+            artifact_path=review_candidate.artifact_path,
+            test_gate_status=review_candidate.test_gate_status,
+        ) if review_candidate and review_run else None),
     )
 
 

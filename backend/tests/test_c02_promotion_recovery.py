@@ -1,5 +1,10 @@
+import asyncio
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from app.agents.fake_candidate_test_runner import FakeCandidateTestRunner
+from app.services.candidate_tests import CandidateTestService
 import pytest
 
 from app.models import Build, BuildCandidate, PlayableVersion, Project, Release
@@ -12,15 +17,15 @@ def test_promote_requires_pass_and_publish_is_explicit(isolated_database) -> Non
     with Session(isolated_database) as session:
         service, project = confirmed_service(session)
         build = service.start_build(project.id)
-        candidate = service.finish_build(build.id, "succeeded", summary="ready", artifact_path="artifacts/v1")
+        candidate = service.finish_build(build.id, "succeeded", summary="ready", artifact_path="dist/index.html")
         assert service.derive_project_stage(project.id) == ProjectStage.CANDIDATE_REVIEW
+        candidate.artifact_checksum = "a" * 64
+        asyncio.run(CandidateTestService(session, FakeCandidateTestRunner("pass")).test_candidate(candidate.id))
+        service.record_human_play_review(candidate.id, decision="accepted")
 
         version = service.promote_candidate(
             candidate.id,
-            test_report_id="report-1",
-            verdict="pass",
             git_commit="abc123",
-            artifact_checksum="sha256:one",
         )
         assert session.get(Project, project.id).current_playable_version_id == version.id
         assert service.derive_project_stage(project.id) == ProjectStage.PLAYABLE
@@ -33,15 +38,14 @@ def test_promotion_rejects_non_passing_verdict(isolated_database) -> None:
     with Session(isolated_database) as session:
         service, project = confirmed_service(session)
         build = service.start_build(project.id)
-        candidate = service.finish_build(build.id, "succeeded", summary="ready", artifact_path="artifacts/v1")
+        candidate = service.finish_build(build.id, "succeeded", summary="ready", artifact_path="dist/index.html")
+        candidate.artifact_checksum = "a" * 64
+        asyncio.run(CandidateTestService(session, FakeCandidateTestRunner("console_failure")).test_candidate(candidate.id))
 
-        with pytest.raises(ValueError, match="passing"):
+        with pytest.raises(ValueError, match="PASSED"):
             service.promote_candidate(
                 candidate.id,
-                test_report_id="report-fail",
-                verdict="fail",
                 git_commit="abc123",
-                artifact_checksum="sha256:one",
             )
 
 

@@ -89,7 +89,7 @@ class FakeGameAgent(GameAgent):
             ]
             result = GameBuildResult(
                 status="succeeded",
-                artifact_manifest=[ArtifactManifestEntry(path="dist/index.html", kind="preview_entry", size_bytes=1200)],
+                artifact_manifest=[ArtifactManifestEntry(path="dist/index.html", kind="preview_entry", size_bytes=1200, sha256="0" * 64)],
                 preview_entry="dist/index.html",
                 diagnostics=[],
                 metadata={"backend": "fake", "operation": request.operation},

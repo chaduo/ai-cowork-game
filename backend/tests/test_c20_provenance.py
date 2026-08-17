@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models import PlayableVersion, Release
+from app.models import HumanPlayReview, PlayableVersion, Release, TestReport as CandidateTestReport
 from app.services.project_git import ProjectGitService
 from app.services.provenance import ProvenanceError, ProvenanceService
 from tests.test_c02_build_service import confirmed_service
@@ -36,6 +36,24 @@ def _promote_with_real_commit(
     candidate = lifecycle.finish_build(
         build.id, "succeeded", summary="ready", artifact_path="playable/index.html"
     )
+    candidate.artifact_checksum = hashlib_sha(artifact_bytes)
+    candidate.test_gate_status = "ready"
+    session.add(CandidateTestReport(
+        candidate_id=candidate.id,
+        runtime_verdict="pass",
+        platform_verdict="PASSED",
+        status="PASSED",
+        severity="none",
+        summary="fixture platform verification passed",
+    ))
+    session.add(HumanPlayReview(
+        candidate_id=candidate.id,
+        decision="accepted",
+        amendment_status="not_required",
+        drift_status="clear",
+        notes="fixture human play review accepted",
+    ))
+    session.flush()
     sha = git.commit(project_id, message=f"promote {candidate.id}", files={"playable/index.html": artifact_bytes})
     checksum = hashlib_sha(git.read_file(project_id, sha, "playable/index.html"))
     version = lifecycle.promote_candidate(

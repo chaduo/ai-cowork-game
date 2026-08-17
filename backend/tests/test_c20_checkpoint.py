@@ -25,7 +25,16 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Build, BuildCandidate, GameDesign, GameDesignRevision, GameSpecRevision, Run
+from app.models import (
+    Build,
+    BuildCandidate,
+    GameDesign,
+    GameDesignRevision,
+    GameSpecRevision,
+    HumanPlayReview,
+    Run,
+    TestReport as CandidateTestReport,
+)
 from app.services.checkpoint import CheckpointService
 from app.services.lifecycle import ProjectLifecycleService
 from app.services.project_git import ProjectGitService
@@ -129,8 +138,29 @@ def _candidate_with_artifact(session: Session, project_id: str, workspace_root: 
     session.add(run)
     session.flush()
     candidate = BuildCandidate(project_id=project_id, build_id=build.id, status="succeeded",
-                                artifact_path="index.html", summary="c")
+                                artifact_path="index.html", artifact_checksum=hashlib.sha256(artifact).hexdigest(), summary="c")
     session.add(candidate)
+    session.flush()
+    # C14 Promote is intentionally stricter than the original C20 checkpoint
+    # fixture: a candidate needs a persisted platform PASSED report and an
+    # accepted Human Play Review. Seed those durable gates instead of relying on
+    # the deprecated caller-supplied verdict arguments.
+    candidate.test_gate_status = "ready"
+    session.add(CandidateTestReport(
+        candidate_id=candidate.id,
+        runtime_verdict="pass",
+        platform_verdict="PASSED",
+        status="PASSED",
+        severity="none",
+        summary="fixture platform verification passed",
+    ))
+    session.add(HumanPlayReview(
+        candidate_id=candidate.id,
+        decision="accepted",
+        amendment_status="not_required",
+        drift_status="clear",
+        notes="fixture human play review accepted",
+    ))
     session.flush()
     return candidate
 

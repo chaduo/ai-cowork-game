@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.agents.fake_game_agent import FakeGameAgent
 from app.contracts.game_agent import AffectedScope, BuildOverride, ResourceReference
 from app.errors import ApiError
 from app.models import Build, BuildCandidate, BuildContext, Project, Run
@@ -97,7 +96,7 @@ def _response(session: Session, build_id: str) -> BuildResponse:
 def _service(request: Request, session: Session) -> BuildService:
     agent = getattr(request.app.state, "game_agent", None)
     if agent is None:
-        agent = FakeGameAgent()
+        raise RuntimeError("game agent provider is not configured")
     return BuildService(session, agent)
 
 
