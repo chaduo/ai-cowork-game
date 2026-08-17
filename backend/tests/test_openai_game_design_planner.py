@@ -94,6 +94,23 @@ def test_provider_accepts_multisegment_text_content_and_partial_draft() -> None:
     assert turn.next_question.id == "exploration-goal"
 
 
+def test_provider_reads_reasoning_content_when_message_content_is_empty() -> None:
+    content = '{"next_question":{"id":"exploration-goal","prompt":"玩家下一步做什么？","choices":[]}}'
+    planner = OpenAICompatibleGameDesignPlanner(
+        base_url="https://example.test/v1",
+        api_key="secret",
+        model="kimi-k3",
+        opener=lambda request, timeout: _Response(
+            {"choices": [{"message": {"content": "", "reasoning_content": content}}]}
+        ),
+    )
+
+    turn = planner.plan_turn("project", _draft(), BrainstormInput(action="answer", question_id="q1", answer="探索"))
+
+    assert turn.next_question is not None
+    assert turn.next_question.id == "exploration-goal"
+
+
 def test_provider_normalizes_follow_up_question_options_with_nulls() -> None:
     content = (
         '{"draft":{"summary":{"title":"灯塔","summary":"探索灯塔","highlights":null,"core_loop":[],"progression":[]}},'

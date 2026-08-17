@@ -31,6 +31,8 @@ def _content_text(content: Any) -> str:
                 parts.append(item["text"])
         if parts:
             return "".join(parts)
+    if isinstance(content, dict) and isinstance(content.get("text"), str):
+        return content["text"]
     raise ValueError("provider content is not text")
 
 
@@ -218,7 +220,9 @@ class OpenAICompatibleGameDesignPlanner:
 
     @staticmethod
     def _parse_turn(body: dict[str, Any], draft: CreatorGameDesignDraft) -> BrainstormTurn:
-        content = body["choices"][0]["message"]["content"]
+        choice = body["choices"][0]
+        message = choice.get("message") or {}
+        content = message.get("content") or message.get("reasoning_content") or choice.get("text")
         decoded = _decode_json(_content_text(content))
         return _turn(decoded, draft)
 
