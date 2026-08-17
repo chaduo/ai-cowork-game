@@ -70,6 +70,7 @@ export interface GameSpecResponse {
   revision_number: number
   status: 'draft' | 'confirmed' | 'superseded'
   confirmed_at: string | null
+  git_commit: string | null
   source_design_revision_id: string | null
   validation_errors: Array<Record<string, unknown>>
   spec: CreatorGameSpec
@@ -133,6 +134,30 @@ export interface CandidateResponse {
   repair_round: number
   source_playable_version_id: string | null
   report: CandidateTestReportResponse | null
+}
+
+export interface HumanPlayReviewResponse {
+  id: string
+  candidate_id: string
+  decision: 'pending' | 'accepted' | 'rejected'
+  notes: string
+  amendment_status: string
+  drift_status: string
+  reviewed_at: string | null
+}
+
+export interface PlayableVersionResponse {
+  version_id: string
+  project_id: string
+  candidate_id: string
+  number: number
+  parent_version_id: string | null
+  test_report_id: string
+  git_commit: string
+  artifact_path: string
+  artifact_checksum: string
+  created_at: string
+  is_current: boolean
 }
 
 export class ApiClientError extends Error {
@@ -242,6 +267,42 @@ export function testBuildCandidate(candidateId: string): Promise<CandidateRespon
 
 export function getBuildCandidateTestReport(candidateId: string): Promise<CandidateResponse> {
   return request<CandidateResponse>(`/v1/candidates/${encodeURIComponent(candidateId)}/test-report`)
+}
+
+export function recordHumanPlayReview(
+  candidateId: string,
+  input: { decision: 'accepted' | 'rejected'; notes?: string },
+): Promise<HumanPlayReviewResponse> {
+  return request<HumanPlayReviewResponse>(`/v1/candidates/${encodeURIComponent(candidateId)}/human-play-review`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      decision: input.decision,
+      notes: input.notes ?? '',
+      amendment_status: 'not_required',
+      drift_status: 'clear',
+    }),
+  })
+}
+
+export function getHumanPlayReview(candidateId: string): Promise<HumanPlayReviewResponse> {
+  return request<HumanPlayReviewResponse>(`/v1/candidates/${encodeURIComponent(candidateId)}/human-play-review`)
+}
+
+export function promoteBuildCandidate(candidateId: string, gitCommit: string): Promise<PlayableVersionResponse> {
+  return request<PlayableVersionResponse>(`/v1/candidates/${encodeURIComponent(candidateId)}/promote`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ git_commit: gitCommit }),
+  })
+}
+
+export function listPlayableVersions(projectId: string): Promise<PlayableVersionResponse[]> {
+  return request<PlayableVersionResponse[]>(`/v1/projects/${encodeURIComponent(projectId)}/playable-versions`)
+}
+
+export function playablePreviewUrl(projectId: string, versionId: string): string {
+  return `/api/v1/projects/${encodeURIComponent(projectId)}/playable-versions/${encodeURIComponent(versionId)}/preview`
 }
 
 export function linkBuildCandidateRepair(parentCandidateId: string, replacementCandidateId: string): Promise<CandidateResponse> {

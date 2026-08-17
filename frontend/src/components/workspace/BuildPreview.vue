@@ -11,10 +11,11 @@ import type { PlayableVersionRecord } from './workspaceTypes'
 const props = withDefaults(defineProps<{
   phase: BuildPhase | ChangePhase
   playable?: PlayableVersionRecord | null
+  realPreviewUrl?: string | null
   release?: ReleaseRecord | null
   resourceBridgeAcknowledged?: boolean
   resourcePendingCount?: number
-}>(), { playable: null, release: null, resourceBridgeAcknowledged: false, resourcePendingCount: 0 })
+}>(), { playable: null, realPreviewUrl: null, release: null, resourceBridgeAcknowledged: false, resourcePendingCount: 0 })
 defineEmits<{ openHistory: []; publish: []; viewRelease: []; continueDevelopment: []; resourceLater: []; resourceReview: [] }>()
 
 const changePhases: ChangePhase[] = [
@@ -71,7 +72,11 @@ const relationshipSummary = computed(() => snapshot.value?.relationshipSummary ?
       <button v-if="release" type="button" @click="$emit('continueDevelopment')">继续开发 <ArrowRight :size="13" /></button>
     </div>
 
-    <div class="farm-preview-frame" :class="`preview-variant-${previewVariant}`">
+    <div v-if="props.realPreviewUrl" class="farm-preview-frame real-preview-frame">
+      <iframe :src="props.realPreviewUrl" title="当前 Playable 游戏预览" sandbox="allow-scripts allow-same-origin"></iframe>
+      <div class="playable-seal"><BadgeCheck :size="15" />REAL PLAYABLE</div>
+    </div>
+    <div v-else class="farm-preview-frame" :class="`preview-variant-${previewVariant}`">
       <img v-if="previewVariant === 'farm'" src="/farm-game-preview.png" :alt="`${projectTitle} 游戏画面`" />
       <div v-else class="neutral-preview-scene">
         <div class="neutral-preview-window"><Coffee v-if="previewVariant === 'coffee'" :size="28" /><Gamepad2 v-else :size="28" /><strong>{{ projectTitle }}</strong><span>{{ previewVariant === 'coffee' ? '营业中 · 今日订单 3 / 5' : '核心玩法原型 · 可继续扩展' }}</span></div>
@@ -89,7 +94,7 @@ const relationshipSummary = computed(() => snapshot.value?.relationshipSummary ?
       <div><span>已可体验</span><p v-for="capability in capabilities" :key="capability"><Check :size="13" />{{ capability }}</p><p v-if="!capabilities.length"><Check :size="13" />核心互动</p></div>
       <div v-if="!ready"><span>仍在制作</span><p><LoaderCircle :size="13" class="spin" />关系反馈</p><p><Sprout :size="13" />更多内容</p></div>
       <div v-else><span>验证结果</span><p><BadgeCheck :size="13" />{{ v2Ready ? '关系反馈增强' : '核心经营闭环' }}</p><p><BadgeCheck :size="13" />{{ v2Ready ? '回归检查通过' : '关系与代际目标' }}</p></div>
-      <div class="preview-runtime-note"><Gamepad2 :size="15" /><span><strong>Static prototype preview</strong>本画面不运行真实 Phaser 游戏</span></div>
+      <div class="preview-runtime-note"><Gamepad2 :size="15" /><span><strong>{{ props.realPreviewUrl ? 'Real playable preview' : 'Static prototype preview' }}</strong>{{ props.realPreviewUrl ? '当前画面来自已 Promote 的真实构建产物' : '本画面不运行真实 Phaser 游戏' }}</span></div>
     </div>
     <ResourceExtractionBridge v-if="release" :acknowledged="resourceBridgeAcknowledged" :pending-count="resourcePendingCount" @later="$emit('resourceLater')" @review="$emit('resourceReview')" />
   </article>
