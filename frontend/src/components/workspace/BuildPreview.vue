@@ -3,6 +3,7 @@ import { ArrowRight, BadgeCheck, Check, Clock3, Coffee, Gamepad2, Heart, History
 import { computed } from 'vue'
 import ResourceExtractionBridge from './ResourceExtractionBridge.vue'
 import { isWorkingPreviewAvailable } from './buildFixture'
+import { previewUrlForPhase } from '../../contracts/previewRouting'
 import type { BuildPhase } from './buildTypes'
 import type { ChangePhase } from './changeTypes'
 import type { ReleaseRecord } from './releaseTypes'
@@ -31,7 +32,7 @@ const ready = computed(() => props.phase === 'playable_ready' || isChangeFlow.va
 const workingChange = computed(() => isChangeFlow.value && !['showing_recommendations', 'playing_v1', 'change_requested', 'analyzing_change', 'change_review', 'playable_v2_ready', 'version_history'].includes(props.phase))
 const available = computed(() => isChangeFlow.value || isWorkingPreviewAvailable(props.phase as BuildPhase))
 const candidatePreview = computed(() => props.phase === 'candidate_ready' && Boolean(props.candidatePreviewUrl))
-const previewUrl = computed(() => props.candidatePreviewUrl || props.realPreviewUrl)
+const previewUrl = computed(() => previewUrlForPhase(props.phase, props.candidatePreviewUrl, props.realPreviewUrl))
 const snapshot = computed(() => props.playable?.snapshot ?? null)
 const projectTitle = computed(() => snapshot.value?.projectTitle ?? '当前项目')
 const playableVersion = computed(() => props.playable?.version ?? 0)

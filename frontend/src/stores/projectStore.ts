@@ -711,6 +711,10 @@ export async function promoteRemoteCandidate(projectId: string): Promise<void> {
     const version = await promoteBuildCandidate(candidateId, gitCommit)
     remote.playableVersion = version
     remote.previewUrl = playablePreviewUrl(projectId, version.version_id)
+    // The candidate endpoint is intentionally no longer playable after
+    // promotion. Drop the review-only URL so a persisted session cannot
+    // request it while the Playable preview is being restored.
+    remote.candidatePreviewUrl = null
     remote.promoteError = null
     session.phase = 'playable_ready'
   } catch (cause) {
@@ -741,6 +745,7 @@ export async function refreshRemotePlayable(projectId: string): Promise<void> {
     }
     session.remoteBuild.playableVersion = current
     session.remoteBuild.previewUrl = playablePreviewUrl(projectId, current.version_id)
+    session.remoteBuild.candidatePreviewUrl = null
     session.phase = 'playable_ready'
   } catch (cause) {
     if (session.remoteBuild) session.remoteBuild.promoteError = cause instanceof ApiClientError ? cause.message : '暂时无法读取 Playable 版本。'
