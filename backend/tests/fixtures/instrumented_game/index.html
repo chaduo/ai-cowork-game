@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Instrumented Test Game</title>
+</head>
+<body>
+  <!--
+    A tiny real game exposing the standard V1 Test Hook
+    (Product Spec §22 / design.md:57 read-only test bridge).
+
+    `window.__GAME_TEST__` exposes:
+      - state()        : read the current game state ("idle" -> "active" -> "done")
+      - trigger()      : apply a test action (advances the core loop once)
+      - isComplete()   : report the completion condition (true once "done")
+
+    The platform BrowserCandidateTestRunner probes this hook to verify build,
+    console, core input, gameplay and completion WITHOUT screenshot-guessing.
+    A real OpenGame game lacks this hook and is correctly rejected with
+    CRITICAL_FAILURE (no hook = no gameplay proof).
+  -->
+  <canvas id="game" width="100" height="100"></canvas>
+  <script>
+    (function () {
+      var state = "idle";
+      var steps = 0;
+      var COMPLETE_AT = 1;
+
+      // Minimal render so the page is a real game, not a stub.
+      var canvas = document.getElementById("game");
+      var ctx = canvas.getContext("2d");
+      function render() {
+        ctx.fillStyle = state === "done" ? "#2d2" : "#222";
+        ctx.fillRect(0, 0, 100, 100);
+      }
+      render();
+
+      // The standard read-only test bridge. The runner reads state, triggers a
+      // test action, and checks completion — it never mutates game internals.
+      window.__GAME_TEST__ = {
+        state: function () { return state; },
+        trigger: function () {
+          steps += 1;
+          state = steps >= COMPLETE_AT ? "done" : "active";
+          render();
+        },
+        isComplete: function () { return state === "done"; },
+      };
+    })();
+  </script>
+</body>
+</html>
