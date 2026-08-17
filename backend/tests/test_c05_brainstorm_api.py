@@ -94,6 +94,8 @@ def test_first_playable_readiness_allows_confirm_after_five_core_decisions(isola
         ).json()
 
     assert turn["readiness"]["status"] == "ready"
+    assert turn["readiness"]["first_playable_ready"] is True
+    assert turn["readiness"]["full_gdd_ready"] is False
     assert turn["next_question"] is None
     confirmed = client.post(f"/api/v1/projects/{project['id']}/design/confirm")
     assert confirmed.status_code == 200

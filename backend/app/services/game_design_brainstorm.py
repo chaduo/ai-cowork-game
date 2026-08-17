@@ -65,7 +65,9 @@ def select_blocking_gap(draft: CreatorGameDesignDraft) -> str | None:
 
 
 def evaluate_first_playable_readiness(draft: CreatorGameDesignDraft) -> DesignReadiness:
-    unresolved = [gap for gap in FIRST_PLAYABLE_GAPS if gap not in _confirmed_categories(draft)]
+    confirmed = _confirmed_categories(draft)
+    unresolved = [gap for gap in FIRST_PLAYABLE_GAPS if gap not in confirmed]
+    full_gdd_missing = [gap for gap in GAP_ORDER if gap not in confirmed]
     if not unresolved:
         status = "ready"
         blockers: list[str] = []
@@ -75,7 +77,13 @@ def evaluate_first_playable_readiness(draft: CreatorGameDesignDraft) -> DesignRe
     else:
         status = "not_ready"
         blockers = []
-    return DesignReadiness(status=status, blockers=blockers, unresolved_decisions=unresolved)
+    return DesignReadiness(
+        status=status,
+        blockers=blockers,
+        unresolved_decisions=unresolved,
+        first_playable_ready=not unresolved,
+        full_gdd_ready=not full_gdd_missing,
+    )
 
 
 def apply_brainstorm_input(

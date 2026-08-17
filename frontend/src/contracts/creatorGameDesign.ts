@@ -41,4 +41,6 @@ export type DesignReadiness = {
   blockers: string[]
   unresolved_decisions: string[]
   checked_at?: string | null
+  first_playable_ready?: boolean
+  full_gdd_ready?: boolean
 }

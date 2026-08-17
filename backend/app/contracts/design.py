@@ -51,6 +51,8 @@ class DesignReadiness(ContractModel):
     blockers: list[str] = Field(default_factory=list)
     unresolved_decisions: list[str] = Field(default_factory=list)
     checked_at: datetime | None = None
+    first_playable_ready: bool | None = Field(default=None, exclude_if=lambda value: value is None)
+    full_gdd_ready: bool | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class CreatorGameDesignDraft(ContractModel):
