@@ -17,7 +17,7 @@ import sqlalchemy as sa
 
 
 revision = "0013_opengame_resume"
-down_revision = "0011_c13_workspace"
+down_revision = "0012_c20_checkpoint"
 branch_labels = None
 depends_on = None
 

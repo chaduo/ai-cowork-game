@@ -58,6 +58,8 @@ class GameDesignRevision(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # C20 line-114: immutable git checkpoint sha recorded by CheckpointService.confirm_gdd.
+    git_commit: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
@@ -76,6 +78,8 @@ class GameSpecRevision(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # C20 line-114: immutable git checkpoint sha recorded by CheckpointService.confirm_gamespec.
+    git_commit: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
@@ -283,4 +287,7 @@ class Release(Base):
     playable_version_id: Mapped[str] = mapped_column(ForeignKey("playable_versions.id"), nullable=False)
     number: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="published")
+    # C20 line-114: publish-time git checkpoint snapshot (CheckpointService.publish) so a
+    # Release resolves to an immutable commit, not only transitively via PlayableVersion.
+    git_commit: Mapped[str | None] = mapped_column(String(128), nullable=True)
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
