@@ -11,6 +11,9 @@ class Settings:
     log_level: str = "INFO"
     game_agent_provider: str = "fake"
     candidate_test_provider: str = "fake"
+    game_design_provider: str = "fake"
+    game_design_model: str = "kimi-k3"
+    game_design_timeout_seconds: float = 45.0
     opengame_cli_js: str | None = None
     opengame_model: str = "kimi-k3"
     opengame_timeout_seconds: float = 300.0
@@ -24,6 +27,9 @@ class Settings:
         log_level: str | None = None,
         game_agent_provider: str | None = None,
         candidate_test_provider: str | None = None,
+        game_design_provider: str | None = None,
+        game_design_model: str | None = None,
+        game_design_timeout_seconds: float | None = None,
         opengame_cli_js: str | None = None,
         opengame_model: str | None = None,
         opengame_timeout_seconds: float | None = None,
@@ -41,6 +47,12 @@ class Settings:
         # production get_settings() below opts into real providers.
         object.__setattr__(self, "game_agent_provider", game_agent_provider or "fake")
         object.__setattr__(self, "candidate_test_provider", candidate_test_provider or "fake")
+        object.__setattr__(self, "game_design_provider", game_design_provider or "fake")
+        object.__setattr__(self, "game_design_model", game_design_model or os.getenv("GAME_DESIGN_MODEL", os.getenv("OPENAI_MODEL", "kimi-k3")))
+        design_timeout = game_design_timeout_seconds
+        if design_timeout is None and os.getenv("GAME_DESIGN_TIMEOUT_SECONDS"):
+            design_timeout = float(os.environ["GAME_DESIGN_TIMEOUT_SECONDS"])
+        object.__setattr__(self, "game_design_timeout_seconds", design_timeout or 45.0)
         object.__setattr__(self, "opengame_cli_js", opengame_cli_js or os.getenv("OPENGAME_CLI_JS"))
         object.__setattr__(self, "opengame_model", opengame_model or os.getenv("OPENAI_MODEL", "kimi-k3"))
         timeout = opengame_timeout_seconds
@@ -59,4 +71,6 @@ def get_settings() -> Settings:
         app_env=os.getenv("APP_ENV", "local"),
         game_agent_provider=os.getenv("GAME_AGENT_PROVIDER", "opengame"),
         candidate_test_provider=os.getenv("CANDIDATE_TEST_PROVIDER", "chrome"),
+        game_design_provider=os.getenv("GAME_DESIGN_PROVIDER", "openai"),
+        game_design_model=os.getenv("GAME_DESIGN_MODEL", os.getenv("OPENAI_MODEL", "kimi-k3")),
     )

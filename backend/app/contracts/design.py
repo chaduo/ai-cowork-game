@@ -15,17 +15,35 @@ class DesignSummary(ContractModel):
 
 
 class DesignDecision(ContractModel):
+    decision_id: str | None = Field(default=None, min_length=1, max_length=120)
     question_id: str = Field(min_length=1)
     question: str = Field(min_length=1)
     response: str = ""
     answer_id: str = Field(min_length=1)
     answer: str = Field(min_length=1)
+    provenance: Literal["user_confirmed", "ai_inferred"] | None = None
+    supersedes_decision_id: str | None = Field(default=None, min_length=1, max_length=120)
+
+
+class BrainstormChoice(ContractModel):
+    id: str = Field(min_length=1, max_length=120)
+    title: str = Field(min_length=1, max_length=240)
+    description: str = Field(default="", max_length=1000)
+    recommended: bool = False
+
+
+class BrainstormQuestion(ContractModel):
+    id: str = Field(min_length=1, max_length=120)
+    prompt: str = Field(min_length=1, max_length=2000)
+    choices: list[BrainstormChoice] = Field(default_factory=list, max_length=4)
+    input_hint: str = Field(default="也可以直接描述你的想法。", max_length=500)
 
 
 class ClarificationState(ContractModel):
     question_index: int = Field(default=0, ge=0)
     status: Literal["clarifying", "ready", "iterating", "confirmed"] = "clarifying"
     custom_input: str = ""
+    current_question: BrainstormQuestion | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class DesignReadiness(ContractModel):

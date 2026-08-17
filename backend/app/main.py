@@ -15,7 +15,9 @@ from app.api.builds import router as builds_router
 from app.api.candidates import router as candidates_router
 from app.api.playables import router as playables_router
 from app.agents.fake_game_agent import FakeGameAgent
+from app.agents.fake_game_design_planner import FakeGameDesignPlanner
 from app.agents.fake_candidate_test_runner import FakeCandidateTestRunner
+from app.agents.openai_game_design_planner import OpenAICompatibleGameDesignPlanner
 from app.agents.opengame_adapter import OpenGameAdapter
 from app.agents.subprocess_executor import AsyncSubprocessExecutor
 from app.services.builds import BuildService
@@ -32,6 +34,7 @@ def create_app(
     *,
     game_agent=None,
     candidate_test_runner=None,
+    game_design_planner=None,
 ) -> FastAPI:
     settings = settings or get_settings()
 
@@ -46,6 +49,21 @@ def create_app(
     app = FastAPI(title="AI Cowork Game API", version=APPLICATION_VERSION, lifespan=lifespan)
     app.state.settings = settings
     app.state.engine = create_engine_for(settings)
+    if game_design_planner is not None:
+        app.state.game_design_planner = game_design_planner
+    elif settings.game_design_provider == "fake":
+        app.state.game_design_planner = FakeGameDesignPlanner()
+    elif settings.game_design_provider == "openai":
+        app.state.game_design_planner = OpenAICompatibleGameDesignPlanner(
+            base_url=os.environ.get("OPENAI_BASE_URL"),
+            api_key=os.environ.get("OPENAI_API_KEY"),
+            model=settings.game_design_model,
+            timeout_seconds=settings.game_design_timeout_seconds,
+        )
+    elif settings.game_design_provider == "none":
+        app.state.game_design_planner = None
+    else:
+        raise ValueError(f"unsupported GAME_DESIGN_PROVIDER: {settings.game_design_provider}")
     if game_agent is not None:
         app.state.game_agent = game_agent
     elif settings.game_agent_provider == "fake":

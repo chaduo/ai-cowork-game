@@ -7,11 +7,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.contracts.design import CreatorGameDesignDraft, DesignReadiness
+from app.contracts.design_brainstorm import BrainstormInput, BrainstormQuestion
+from app.agents.game_design_planner import GameDesignPlannerError, GameDesignProviderNotConfigured
 from app.contracts.gamespec import CreatorGameSpec
 from app.errors import ApiError
 from app.models import GameDesign, GameDesignRevision, GameSpecRevision, Project
 from app.services.checkpoint import CheckpointService
 from app.services.lifecycle import DesignNotReadyError, ProjectLifecycleService
+from app.services.game_design_brainstorm import apply_brainstorm_input, evaluate_first_playable_readiness
 
 router = APIRouter(prefix="/api/v1/projects", tags=["design"])
 
@@ -28,6 +31,7 @@ class DesignResponse(BaseModel):
     git_commit: str | None = None  # C20: immutable checkpoint of the confirmed GDD
     readiness: DesignReadiness
     draft: CreatorGameDesignDraft
+    next_question: BrainstormQuestion | None = None
 
 
 class GameSpecResponse(BaseModel):
@@ -96,6 +100,7 @@ def _response(session: Session, project: Project, design: GameDesign | None) -> 
         git_commit=confirmed_revision.git_commit if confirmed_revision else None,
         readiness=readiness,
         draft=draft,
+        next_question=draft.clarification.current_question,
     )
 
 
@@ -155,6 +160,49 @@ def confirm_design(project_id: str, request: Request) -> DesignResponse:
             CheckpointService(session).confirm_gdd(project.id, confirmed.confirmed_revision_id)
         session.commit()
         return _response(session, project, confirmed)
+
+
+@router.post("/{project_id}/design/brainstorm", response_model=DesignResponse)
+def brainstorm_design(project_id: str, payload: BrainstormInput, request: Request) -> DesignResponse:
+    planner = getattr(request.app.state, "game_design_planner", None)
+    if planner is None:
+        raise ApiError(
+            "game_design_provider_not_configured",
+            "Game Design provider is not configured",
+            [],
+            503,
+        )
+    with _session(request) as session:
+        project = _project(session, project_id)
+        design = session.scalar(select(GameDesign).where(GameDesign.project_id == project.id))
+        current = _response(session, project, design).draft
+        base = apply_brainstorm_input(current, payload, turn=current.clarification.question_index + (1 if payload.action in {"answer", "free_text"} else 0))
+        try:
+            planned = planner.plan_turn(project.id, base, payload)
+        except GameDesignProviderNotConfigured as cause:
+            raise ApiError("game_design_provider_not_configured", str(cause), [], 503) from cause
+        except GameDesignPlannerError as cause:
+            raise ApiError("game_design_provider_failed", str(cause), [], 502) from cause
+        # Provider text can propose the next question and summary, but it cannot
+        # erase the reducer's user-confirmed decisions or decide readiness.
+        merged_clarification = planned.draft.clarification.model_copy(
+            update={
+                "question_index": base.clarification.question_index,
+                "custom_input": base.clarification.custom_input,
+                "current_question": planned.next_question,
+            }
+        )
+        merged = planned.draft.model_copy(
+            update={
+                "original_idea": base.original_idea,
+                "decisions": base.decisions,
+                "clarification": merged_clarification,
+                "readiness": evaluate_first_playable_readiness(base),
+            }
+        )
+        saved = ProjectLifecycleService(session).submit_design(project.id, merged.model_dump(mode="json", exclude_none=True))
+        session.commit()
+        return _response(session, project, saved)
 
 
 @router.get("/{project_id}/gamespec", response_model=GameSpecResponse)
