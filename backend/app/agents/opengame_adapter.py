@@ -73,6 +73,7 @@ class OpenGameAdapter:
         timeout_seconds: float | None = 300,
         opengame_cli_js: str | None = None,
         workspace_manager: WorkspaceManager | None = None,
+        require_credentials: bool = False,
     ) -> None:
         self._executor = executor
         self._model = model
@@ -81,6 +82,7 @@ class OpenGameAdapter:
         self._sandbox = sandbox
         self._timeout = timeout_seconds
         self._cli_js = opengame_cli_js or _default_cli_js()
+        self._require_credentials = require_credentials
         # C13: the workspace policy + lifecycle. Defaults to a real manager rooted
         # at data/workspaces; tests/Fake inject one. The adapter never reads the
         # parent environment for paths and confines artifact scanning to this.
@@ -102,6 +104,13 @@ class OpenGameAdapter:
 
         if request.operation not in SUPPORTED_OPERATIONS:
             run = _Run.unsupported(handle, request, started_at)
+            self._runs[run_id] = run
+            return handle
+
+        if self._require_credentials and (
+            not self._cli_js or not self._api_key or not self._base_url
+        ):
+            run = _Run.configuration_error(handle, request, started_at)
             self._runs[run_id] = run
             return handle
 
@@ -170,13 +179,19 @@ class OpenGameAdapter:
 
 def _default_cli_js() -> str:
     """Locate opengame's dist/cli.js (the npm-link'd install), or a vendored copy."""
+    explicit = os.getenv("OPENGAME_CLI_JS")
+    if explicit and os.path.isfile(explicit):
+        return os.path.realpath(explicit)
     candidates = [
         r"D:\Program Files (x86)\nodejs\node_global\node_modules\@opengame\opengame\dist\cli.js",
         "vendor/opengame/dist/cli.js",
     ]
     og = shutil.which("opengame")
     if og:
-        shim_dir = os.path.dirname(os.path.realpath(og))
+        real_cli = os.path.realpath(og)
+        if os.path.isfile(real_cli):
+            candidates.append(real_cli)
+        shim_dir = os.path.dirname(real_cli)
         candidates.append(
             os.path.join(shim_dir, "node_modules", "@opengame", "opengame", "dist", "cli.js")
         )
@@ -211,6 +226,11 @@ def _build_prompt(request: GameBuildRequest) -> str:
     prompt = (
         "Build a self-contained playable game from the confirmed design. "
         "Write the preview entry as index.html inside the supplied workspace. "
+        "The generated index.html MUST expose a platform test hook exactly as "
+        "window.__GAME_TEST__ = {version: 1, ready: true, run: async (check) => "
+        "({passed: boolean, observed: string})}. The run function MUST support "
+        "the checks core_input, gameplay, and completion and must exercise the "
+        "actual game state rather than returning hardcoded PASS. "
         "Do not access host paths, credentials, or files outside the workspace.\n"
         f"Creator request: {request.request_text or '(none)'}\n"
         f"Confirmed design (JSON): {spec_json}"
@@ -269,6 +289,30 @@ class _Run:
             error=ContractError(code="unsupported_operation",
                                 message=f"{request.operation} is not supported"),
             metadata={"backend": "opengame", "operation": request.operation},
+        )
+        return run
+
+    @classmethod
+    def configuration_error(cls, handle, request, started_at) -> "_Run":
+        run = cls.unsupported(handle, request, started_at)
+        error = ContractError(
+            code="opengame_not_configured",
+            message="OpenGame provider is not configured; set OPENGAME_CLI_JS, OPENAI_API_KEY and OPENAI_BASE_URL",
+        )
+        run.run_events = [RunEvent(
+            run_id=handle.run_id,
+            sequence=1,
+            stage="terminal",
+            kind="terminal",
+            message=error.message,
+            timestamp=started_at,
+            error=error,
+        )]
+        run.result = GameBuildResult(
+            status="failed",
+            diagnostics=[Diagnostic(level="error", code=error.code, message=error.message)],
+            metadata={"backend": "opengame", "operation": request.operation},
+            error=error,
         )
         return run
 

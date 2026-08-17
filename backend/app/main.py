@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import os
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
@@ -15,6 +16,8 @@ from app.api.candidates import router as candidates_router
 from app.api.playables import router as playables_router
 from app.agents.fake_game_agent import FakeGameAgent
 from app.agents.fake_candidate_test_runner import FakeCandidateTestRunner
+from app.agents.opengame_adapter import OpenGameAdapter
+from app.agents.subprocess_executor import AsyncSubprocessExecutor
 from app.services.builds import BuildService
 from sqlalchemy.orm import Session
 from app.db import create_engine_for
@@ -24,7 +27,12 @@ SERVICE_NAME = "ai-cowork-game-api"
 APPLICATION_VERSION = "0.1.0"
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    game_agent=None,
+    candidate_test_runner=None,
+) -> FastAPI:
     settings = settings or get_settings()
 
     @asynccontextmanager
@@ -38,8 +46,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="AI Cowork Game API", version=APPLICATION_VERSION, lifespan=lifespan)
     app.state.settings = settings
     app.state.engine = create_engine_for(settings)
-    app.state.game_agent = FakeGameAgent()
-    app.state.candidate_test_runner = FakeCandidateTestRunner("pass")
+    if game_agent is not None:
+        app.state.game_agent = game_agent
+    elif settings.game_agent_provider == "fake":
+        app.state.game_agent = FakeGameAgent()
+    elif settings.game_agent_provider == "opengame":
+        app.state.game_agent = OpenGameAdapter(
+            AsyncSubprocessExecutor(),
+            model=settings.opengame_model,
+            openai_api_key=os.environ.get("OPENAI_API_KEY"),
+            openai_base_url=os.environ.get("OPENAI_BASE_URL"),
+            timeout_seconds=settings.opengame_timeout_seconds,
+            opengame_cli_js=settings.opengame_cli_js,
+            require_credentials=True,
+        )
+    else:
+        raise ValueError(f"unsupported GAME_AGENT_PROVIDER: {settings.game_agent_provider}")
+    app.state.candidate_test_provider = settings.candidate_test_provider
+    app.state.candidate_test_runner = candidate_test_runner
+    if candidate_test_runner is None and settings.candidate_test_provider == "fake":
+        app.state.candidate_test_runner = FakeCandidateTestRunner("pass")
     app.add_exception_handler(ApiError, handle_api_error)
     app.add_exception_handler(RequestValidationError, handle_validation_error)
     app.add_exception_handler(Exception, handle_unexpected_error)
