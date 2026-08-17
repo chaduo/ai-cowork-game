@@ -54,6 +54,25 @@ def test_provider_parses_fenced_json_without_leaking_credentials() -> None:
     assert turn.next_question.id == "exploration-core_experience"
 
 
+def test_provider_uses_compatible_json_instruction_without_response_format_extension() -> None:
+    captured: dict = {}
+
+    def opener(request, timeout):
+        captured.update(json.loads(request.data.decode()))
+        return _Response({"choices": [{"message": {"content": "{}"}}]})
+
+    planner = OpenAICompatibleGameDesignPlanner(
+        base_url="https://example.test/v1",
+        api_key="secret",
+        model="test-model",
+        opener=opener,
+    )
+    with pytest.raises(GameDesignProviderError):
+        planner.plan_turn("project", _draft(), BrainstormInput(action="start"))
+
+    assert "response_format" not in captured
+
+
 def test_provider_rejects_malformed_json() -> None:
     with pytest.raises(GameDesignProviderError, match="invalid brainstorm JSON"):
         _provider("not json").plan_turn("project", _draft(), BrainstormInput(action="start"))
