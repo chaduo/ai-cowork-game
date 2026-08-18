@@ -53,6 +53,7 @@ class ProjectResponse(BaseModel):
     name: str
     original_idea: str
     stage: ProjectStage
+    created_at: datetime
     updated_at: datetime
     current_playable: PlayableSummary | None = None
     latest_release: ReleaseSummary | None = None
@@ -112,6 +113,7 @@ def _response(session: Session, project: Project) -> ProjectResponse:
         name=project.name,
         original_idea=project.original_idea,
         stage=ProjectLifecycleService(session).derive_project_stage(project.id),
+        created_at=project.created_at,
         updated_at=max(timestamps),
         current_playable=(PlayableSummary(
             id=current_playable.id,

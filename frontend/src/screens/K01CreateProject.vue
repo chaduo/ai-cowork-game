@@ -11,20 +11,15 @@ import {
 } from 'lucide-vue-next'
 import CreativeKickoffModal from '../components/kickoff/CreativeKickoffModal.vue'
 import type { ConfirmedGameDesign } from '../components/kickoff/kickoffTypes'
-import type { ProjectSession } from '../stores/projectStore'
 import { runtimeConfig } from '../stores/projectStore'
-import { ApiClientError, brainstormProjectDesign, confirmProjectDesign, createProjectRecord, getProjectDesign, type BrainstormInput } from '../api/client'
-import type { ProjectResponse } from '../api/client'
+import { ApiClientError, brainstormProjectDesign, confirmProjectDesign, createProjectRecord, getProjectDesign, type BrainstormInput, type ProjectResponse } from '../api/client'
 import type { CreatorGameDesignDraft } from '../contracts/creatorGameDesign'
 
 const props = defineProps<{
-  projects: ProjectSession[]
   remoteProjects?: ProjectResponse[] | null
   resumeProjectId?: string | null
-  projectsLoading?: boolean
-  projectListError?: string | null
 }>()
-const emit = defineEmits<{ enterWorkspace: [design: ConfirmedGameDesign, projectId: string]; openProject: [projectId: string]; resumeConsumed: []; resources: [] }>()
+const emit = defineEmits<{ enterWorkspace: [design: ConfirmedGameDesign, projectId: string]; resumeConsumed: []; projects: []; resources: [] }>()
 
 type GameTemplate = {
   id: string
@@ -97,45 +92,6 @@ const selectedTemplate = computed(() =>
   templates.find((template) => template.id === selectedTemplateId.value) ?? null,
 )
 const canCreate = computed(() => idea.value.trim().length > 0)
-type ProjectListItem = {
-  id: string
-  name: string
-  updatedAt: number
-  stage: string
-}
-
-const stageLabels: Record<string, string> = {
-  design_draft: 'Game Design',
-  design_review: 'Game Design 待确认',
-  gamespec_review: 'GameSpec 待确认',
-  ready_to_build: '准备构建',
-  building: '正在构建',
-  candidate_review: '候选版本待确认',
-  playable: '可试玩',
-  published: '已发布',
-  archived: '已归档',
-}
-
-const projects = computed<ProjectListItem[]>(() => {
-  const remoteById = new Map((props.remoteProjects ?? []).map((project) => [project.id, project]))
-  const local = props.projects.map((project) => {
-    const remote = remoteById.get(project.id)
-    return {
-      id: project.id,
-      name: remote?.name ?? project.design.projectTitle,
-      updatedAt: remote ? Math.max(Date.parse(remote.updated_at), project.updatedAt) : project.updatedAt,
-      stage: project.playableVersions.length > 0 || project.releases.length > 0
-        ? projectStage(project)
-        : remote?.stage ?? projectStage(project),
-    }
-  })
-  const localIds = new Set(local.map((project) => project.id))
-  const remoteOnly = (props.remoteProjects ?? [])
-    .filter((project) => !localIds.has(project.id))
-    .map((project) => ({ id: project.id, name: project.name, updatedAt: Date.parse(project.updated_at), stage: project.stage }))
-  return [...local, ...remoteOnly].sort((left, right) => right.updatedAt - left.updatedAt)
-})
-
 watch(
   () => props.resumeProjectId,
   async (projectId) => {
@@ -160,26 +116,6 @@ watch(
     }
   },
 )
-
-function projectStage(project: ProjectSession): string {
-  if (project.releases.length > 0) return 'published'
-  if (project.playableVersions.length > 0) return 'playable'
-  if (project.phase.includes('build') || project.phase.includes('change')) return 'building'
-  return 'gamespec_review'
-}
-
-function displayStage(stage: string): string {
-  return stageLabels[stage] ?? stage
-}
-
-function relativeUpdatedAt(updatedAt: number): string {
-  const elapsedMinutes = Math.max(0, Math.floor((Date.now() - updatedAt) / 60_000))
-  if (elapsedMinutes < 1) return '刚刚更新'
-  if (elapsedMinutes < 60) return `${elapsedMinutes} 分钟前更新`
-  const elapsedHours = Math.floor(elapsedMinutes / 60)
-  if (elapsedHours < 24) return `${elapsedHours} 小时前更新`
-  return `${Math.floor(elapsedHours / 24)} 天前更新`
-}
 
 function scrollToTemplates() {
   templateSectionRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -290,38 +226,10 @@ function onIdeaKeydown(event: KeyboardEvent) {
         <span class="k01-brand-mark"><Gamepad2 :size="18" stroke-width="1.8" /></span>
         <span>AI Cowork Game</span>
       </a>
-      <nav class="k01-global-nav" aria-label="全局导航"><button class="active" type="button"><FolderOpen :size="16" />Projects</button><button type="button" @click="$emit('resources')">我的资源</button></nav>
+      <nav class="k01-global-nav" aria-label="全局导航"><button type="button" @click="emit('projects')"><FolderOpen :size="16" />Projects</button><button type="button" @click="emit('resources')">我的资源</button></nav>
     </header>
 
     <main>
-      <section v-if="projectsLoading" class="project-list project-list-state" aria-live="polite">
-        <span class="project-list-state-kicker">PROJECTS</span>
-        <strong>正在加载你的项目…</strong>
-      </section>
-
-      <section v-else-if="projectListError" class="project-list project-list-state" role="alert">
-        <span class="project-list-state-kicker">PROJECTS</span>
-        <strong>{{ projectListError }}</strong>
-      </section>
-
-      <section v-else-if="projects.length" class="project-list" aria-labelledby="project-list-title">
-        <div class="project-list-heading"><div><span>MY PROJECTS</span><h2 id="project-list-title">我的项目</h2></div><strong>{{ projects.length }}</strong></div>
-        <div class="project-list-items">
-          <button v-for="project in projects" :key="project.id" class="project-list-item" type="button" @click="$emit('openProject', project.id)">
-            <span class="project-list-icon"><Gamepad2 :size="17" /></span>
-            <span class="project-list-copy"><strong>{{ project.name }}</strong><small>{{ relativeUpdatedAt(project.updatedAt) }}</small></span>
-            <span class="project-list-stage">{{ displayStage(project.stage) }}</span>
-            <ArrowRight :size="16" />
-          </button>
-        </div>
-      </section>
-
-      <section v-else class="project-list project-list-state" aria-live="polite">
-        <span class="project-list-state-kicker">MY PROJECTS</span>
-        <strong>还没有项目</strong>
-        <small>从下面写下一个想法，开始你的第一个游戏。</small>
-      </section>
-
       <section id="creator" ref="creatorRef" class="creator-hero" aria-labelledby="creator-title">
         <div class="creator-index" aria-hidden="true"><span>01</span><i></i><span>IDEA</span></div>
         <h1 id="creator-title">把一个想法，变成可玩的游戏</h1>
