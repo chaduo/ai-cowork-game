@@ -126,7 +126,7 @@ No new scope starts while the previous day's vertical gate is red.
 
 **zhao**
 
-- [ ] Complete C16 Publish Review/Release and implementation override review.
+- [x] Complete C16 Publish Review/Release and implementation override review. — Done 2026-08-18: persisted Publish Review/Release API, immutable provenance snapshot, idempotent Human Publish, refresh hydration, and honest empty resource-extraction boundary. Evidence: `docs/development/C16_RELEASE_PUBLISHING.md`.
 - [ ] Complete C17 ResourceCandidate batch, Resource Review and persistent My Resources.
 - [ ] Complete C18 resource reference/use/cancel provenance and first-use immutable snapshots.
 
