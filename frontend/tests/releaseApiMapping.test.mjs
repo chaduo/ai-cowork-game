@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { mapReleaseResponse, pendingResourceCountFromRelease } from '../src/contracts/releaseMapping.ts'
+import { mapReleaseResponse, pendingResourceCountFromRelease, releaseDraftFromReview } from '../src/contracts/releaseMapping.ts'
 
 test('maps persisted Release provenance into the Workspace record', () => {
   const release = mapReleaseResponse({
@@ -49,5 +49,24 @@ test('does not invent pending resource count for an empty batch', () => {
   assert.equal(
     pendingResourceCountFromRelease({ status: 'published', resource_batch: { status: 'empty', candidate_count: 0 } }),
     0,
+  )
+})
+
+test('builds a local Publish Review draft from persisted remote provenance', () => {
+  assert.deepEqual(
+    releaseDraftFromReview({
+      next_release_number: 2,
+      playable_number: 3,
+      game_design_revision_number: 4,
+      gamespec_revision_number: 5,
+    }, '灯塔', '完成核心目标'),
+    {
+      version: 2,
+      name: '灯塔 · Release 2',
+      description: '完成核心目标',
+      basedOnPlayable: 3,
+      basedOnGameDesign: 4,
+      basedOnGameSpec: 5,
+    },
   )
 })

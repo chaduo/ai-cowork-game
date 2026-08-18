@@ -59,6 +59,8 @@ class PublishReviewResponse(BaseModel):
     playable_number: int | None
     game_design_revision_id: str | None
     gamespec_revision_id: str | None
+    game_design_revision_number: int | None
+    gamespec_revision_number: int | None
     artifact_path: str | None
     artifact_checksum: str | None
     git_commit: str | None
@@ -139,11 +141,13 @@ def _review(session: Session, project: Project) -> PublishReviewResponse:
     ) if version else None
     design = session.scalar(select(GameDesign).where(GameDesign.project_id == project.id))
     design_revision_id = design.confirmed_revision_id if design else None
+    design_revision = session.get(GameDesignRevision, design_revision_id) if design_revision_id else None
     gamespec_revision_id: str | None = None
     if version:
         candidate = session.get(BuildCandidate, version.candidate_id)
         build = session.get(Build, candidate.build_id) if candidate else None
         gamespec_revision_id = build.gamespec_revision_id if build else None
+    gamespec_revision = session.get(GameSpecRevision, gamespec_revision_id) if gamespec_revision_id else None
 
     reason: str | None = None
     eligible = True
@@ -166,6 +170,8 @@ def _review(session: Session, project: Project) -> PublishReviewResponse:
         playable_number=version.number if version else None,
         game_design_revision_id=design_revision_id,
         gamespec_revision_id=gamespec_revision_id,
+        game_design_revision_number=design_revision.revision_number if design_revision else None,
+        gamespec_revision_number=gamespec_revision.revision_number if gamespec_revision else None,
         artifact_path=version.artifact_path if version else None,
         artifact_checksum=version.artifact_checksum if version else None,
         git_commit=version.git_commit if version else None,

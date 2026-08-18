@@ -1,4 +1,5 @@
 import type { ReleaseRecord } from '../components/workspace/releaseTypes'
+import type { ReleaseDraft } from '../components/workspace/releaseTypes'
 
 export type ResourceBatchApiResponse = {
   status: string
@@ -51,4 +52,24 @@ export function pendingResourceCountFromRelease(record: Pick<ReleaseApiResponse,
   if (record.status !== 'published') return 0
   if (!['ready', 'pending'].includes(record.resource_batch.status)) return 0
   return Math.max(0, record.resource_batch.candidate_count)
+}
+
+export function releaseDraftFromReview(
+  review: {
+    next_release_number: number
+    playable_number: number | null
+    game_design_revision_number?: number | null
+    gamespec_revision_number?: number | null
+  },
+  projectTitle: string,
+  fallbackDescription: string,
+): ReleaseDraft {
+  return {
+    version: review.next_release_number,
+    name: `${projectTitle} · Release ${review.next_release_number}`,
+    description: fallbackDescription,
+    basedOnPlayable: review.playable_number ?? 0,
+    basedOnGameDesign: review.game_design_revision_number ?? 0,
+    basedOnGameSpec: review.gamespec_revision_number ?? 0,
+  }
 }

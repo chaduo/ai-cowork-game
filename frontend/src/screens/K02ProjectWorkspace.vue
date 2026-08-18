@@ -50,7 +50,9 @@ import {
   cancelRelationshipResource as cancelProjectRelationshipResource,
   dismissResourceRecommendation,
   prepareReleaseReview,
+  prepareRemoteReleaseReview,
   publishRelease as publishProjectRelease,
+  publishRemoteRelease,
   createReleaseDraftForProject,
   getCurrentRelease,
   getCurrentPlayable,
@@ -350,18 +352,30 @@ function closeVersionHistory() {
   if (phase.value === 'version_history') setWorkspacePhase(session.id, 'playable_v2_ready')
 }
 
-function openReleaseReview() {
+async function openReleaseReview() {
   const publishEligible = phase.value === 'playable_ready' || isChangeMode.value
   if (!publishEligible) return
   versionHistoryOpen.value = false
   releaseDetailOpen.value = false
-  resetReleaseDraft()
-  prepareReleaseReview(session.id)
+  if (session.backendProjectId) {
+    const eligible = await prepareRemoteReleaseReview(session.id)
+    if (!eligible && session.remoteRelease?.reason === 'already_published') {
+      releaseDetailOpen.value = true
+      return
+    }
+  } else {
+    resetReleaseDraft()
+    prepareReleaseReview(session.id)
+  }
   releaseReviewOpen.value = true
 }
 
 function publishRelease() {
   if (releasePhase.value !== 'review' && releasePhase.value !== 'error') return
+  if (session.backendProjectId) {
+    void publishRemoteRelease(session.id)
+    return
+  }
   publishProjectRelease(session.id)
 }
 

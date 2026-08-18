@@ -183,6 +183,8 @@ export interface PublishReviewResponse {
   playable_number: number | null
   game_design_revision_id: string | null
   gamespec_revision_id: string | null
+  game_design_revision_number: number | null
+  gamespec_revision_number: number | null
   artifact_path: string | null
   artifact_checksum: string | null
   git_commit: string | null

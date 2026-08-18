@@ -80,6 +80,8 @@ def test_publish_review_is_not_eligible_without_current_playable(isolated_databa
         "playable_number": None,
         "game_design_revision_id": None,
         "gamespec_revision_id": None,
+        "game_design_revision_number": None,
+        "gamespec_revision_number": None,
         "artifact_path": None,
         "artifact_checksum": None,
         "git_commit": None,
