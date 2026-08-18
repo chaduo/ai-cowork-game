@@ -2,6 +2,7 @@ import asyncio
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents.fake_candidate_test_runner import FakeCandidateTestRunner
@@ -14,7 +15,7 @@ from tests.test_c05_gamespec_contract import valid_gamespec
 from tests.test_c05_design_api import draft_payload
 
 
-def _promoted_app(isolated_database, tmp_path: Path):
+def _ready_candidate_app(isolated_database, tmp_path: Path):
     app = create_app(Settings(database_url=str(isolated_database.url)))
     with Session(app.state.engine) as session:
         lifecycle = ProjectLifecycleService(session)
@@ -57,10 +58,52 @@ def _promoted_app(isolated_database, tmp_path: Path):
         session.add(candidate)
         session.flush()
         asyncio.run(CandidateTestService(session, FakeCandidateTestRunner("pass")).test_candidate(candidate.id))
-        lifecycle.record_human_play_review(candidate.id, decision="accepted", notes="Looks good")
-        version = lifecycle.promote_candidate(candidate.id, git_commit="preview-commit")
         session.commit()
-        return app, project.id, version.id
+        return app, project.id, candidate.id
+
+
+def _promoted_app(isolated_database, tmp_path: Path):
+    app, project_id, candidate_id = _ready_candidate_app(isolated_database, tmp_path)
+    with Session(app.state.engine) as session:
+        lifecycle = ProjectLifecycleService(session)
+        lifecycle.record_human_play_review(candidate_id, decision="accepted", notes="Looks good")
+        version = lifecycle.promote_candidate(candidate_id, git_commit="preview-commit")
+        session.commit()
+        return app, project_id, version.id
+
+
+def test_candidate_preview_is_available_after_platform_pass_before_promote(isolated_database, tmp_path: Path) -> None:
+    app, project_id, candidate_id = _ready_candidate_app(isolated_database, tmp_path)
+
+    response = TestClient(app).get(
+        f"/api/v1/projects/{project_id}/candidates/{candidate_id}/preview"
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "window.__GAME_TEST__" in response.text
+
+    with Session(app.state.engine) as session:
+        candidate = session.get(BuildCandidate, candidate_id)
+        assert candidate is not None
+        assert candidate.status == "succeeded"
+        assert session.scalars(select(PlayableVersion)).first() is None
+
+
+def test_candidate_preview_requires_ready_test_gate(isolated_database, tmp_path: Path) -> None:
+    app, project_id, candidate_id = _ready_candidate_app(isolated_database, tmp_path)
+    with Session(app.state.engine) as session:
+        candidate = session.get(BuildCandidate, candidate_id)
+        assert candidate is not None
+        candidate.test_gate_status = "untested"
+        session.commit()
+
+    response = TestClient(app).get(
+        f"/api/v1/projects/{project_id}/candidates/{candidate_id}/preview"
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "candidate_preview_not_ready"
 
 
 def test_preview_returns_promoted_html_artifact(isolated_database, tmp_path: Path) -> None:

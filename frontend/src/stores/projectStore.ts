@@ -7,11 +7,13 @@ import type { ChangePhase, ChangePlan, ChangeSource } from '../components/worksp
 import { createGameSpecFixture } from '../components/workspace/gameSpecFixture'
 import { createResourceCandidates as createResourceCandidatesFixture } from '../components/resources/resourceFixtures'
 import { matchResourcesToSpec } from './resourceMatching'
+import { routeRemoteBuildState, type RemoteBuildRoute } from '../contracts/remoteBuildRouting'
 import type { ReleaseDraft, ReleasePhase, ReleaseRecord } from '../components/workspace/releaseTypes'
 import type { CreatorGameSpec } from '../contracts/creatorGameSpec'
 import {
   ApiClientError,
   cancelProjectBuild,
+  candidatePreviewUrl,
   createProjectBuild,
   getBuildCandidateTestReport,
   getHumanPlayReview,
@@ -77,6 +79,7 @@ export type RemoteBuildState = {
   errorMessage: string | null
   testGateStatus?: string
   testReport?: CandidateTestReportResponse | null
+  candidatePreviewUrl?: string | null
   testRunning?: boolean
   testError?: string | null
   humanReview?: HumanPlayReviewResponse | null
@@ -510,21 +513,56 @@ function applyRemoteBuildResponse(projectId: string, response: BuildResponse): v
 }
 
 function applyRemoteBuildState(session: ProjectSession, state: RemoteBuildState): void {
-  session.remoteBuild = state
-  if (state.playableVersion) {
+  const normalized = state.status === 'succeeded' && !state.candidateId
+    ? {
+      ...state,
+      status: 'invalid_output',
+      errorCode: state.errorCode ?? 'invalid_output',
+      errorMessage: state.errorMessage ?? 'Build 已完成，但没有生成可审核的 Candidate。',
+    }
+    : state
+  session.remoteBuild = normalized
+  const route = routeRemoteBuildState({
+    status: normalized.status,
+    candidateId: normalized.candidateId,
+    playableCandidateId: normalized.playableVersion?.candidate_id,
+  })
+  applyRemoteWorkspaceRoute(session, route)
+  touchProject(session)
+}
+
+function applyRemoteWorkspaceRoute(session: ProjectSession, route: RemoteBuildRoute): void {
+  if (route === 'playable') {
     session.phase = 'playable_ready'
     clearRemoteBuildPoller(session.id)
-  } else if (state.status === 'succeeded' && state.candidateId) {
+  } else if (route === 'candidate') {
     // A successful build creates a Candidate only. Promotion remains a Human Gate.
     session.phase = 'candidate_ready'
     clearRemoteBuildPoller(session.id)
-  } else if (REMOTE_BUILD_TERMINAL_STATUSES.has(state.status)) {
+  } else if (route === 'error') {
     session.phase = 'build_error'
     clearRemoteBuildPoller(session.id)
   } else {
     session.phase = 'building_foundation'
   }
+}
+
+export function restoreRemoteWorkspacePhase(projectId: string): RemoteBuildRoute | null {
+  const session = getProject(projectId)
+  if (!session) return null
+  if (!session.remoteBuild) {
+    if (getCurrentPlayable(session)) session.phase = 'playable_ready'
+    touchProject(session)
+    return getCurrentPlayable(session) ? 'playable' : null
+  }
+  const route = routeRemoteBuildState({
+    status: session.remoteBuild.status,
+    candidateId: session.remoteBuild.candidateId,
+    playableCandidateId: session.remoteBuild.playableVersion?.candidate_id,
+  })
+  applyRemoteWorkspaceRoute(session, route)
   touchProject(session)
+  return route
 }
 
 export function hydrateRemoteBuild(projectId: string, state: RemoteBuildState): void {
@@ -558,7 +596,11 @@ export async function startRemoteBuild(projectId: string): Promise<void> {
   const session = getProject(projectId)
   if (!session?.backendProjectId) return
   const existing = session.remoteBuild
-  if (existing && !REMOTE_BUILD_TERMINAL_STATUSES.has(existing.status)) return
+  const buildStillOwnsWork = existing && (
+    !REMOTE_BUILD_TERMINAL_STATUSES.has(existing.status)
+    || (existing.status === 'succeeded' && Boolean(existing.candidateId))
+  )
+  if (buildStillOwnsWork) return
 
   const buildId = existing?.buildId ?? crypto.randomUUID()
   const runId = existing?.runId ?? `run-${buildId}`
@@ -570,6 +612,8 @@ export async function startRemoteBuild(projectId: string): Promise<void> {
     artifactPath: null,
     errorCode: null,
     errorMessage: null,
+    playableVersion: existing?.playableVersion ?? null,
+    previewUrl: existing?.previewUrl ?? null,
   }
   session.phase = 'build_starting'
   touchProject(session)
@@ -628,6 +672,9 @@ export async function testRemoteCandidate(projectId: string): Promise<void> {
     const response = await testBuildCandidate(candidateId)
     session.remoteBuild.testGateStatus = response.test_gate_status
     session.remoteBuild.testReport = response.report
+    session.remoteBuild.candidatePreviewUrl = response.test_gate_status === 'ready'
+      ? candidatePreviewUrl(projectId, candidateId)
+      : null
   } catch (cause) {
     session.remoteBuild.testError = cause instanceof ApiClientError ? cause.message : '平台验证暂时无法完成。'
   } finally {
@@ -644,6 +691,9 @@ export async function refreshRemoteCandidateTest(projectId: string): Promise<voi
     const response = await getBuildCandidateTestReport(candidateId)
     session.remoteBuild.testGateStatus = response.test_gate_status
     session.remoteBuild.testReport = response.report
+    session.remoteBuild.candidatePreviewUrl = response.test_gate_status === 'ready'
+      ? candidatePreviewUrl(projectId, candidateId)
+      : null
     session.remoteBuild.testError = null
   } catch (cause) {
     session.remoteBuild.testError = cause instanceof ApiClientError ? cause.message : '暂时无法读取平台验证证据。'
@@ -703,6 +753,10 @@ export async function promoteRemoteCandidate(projectId: string): Promise<void> {
     const version = await promoteBuildCandidate(candidateId, gitCommit)
     remote.playableVersion = version
     remote.previewUrl = playablePreviewUrl(projectId, version.version_id)
+    // The candidate endpoint is intentionally no longer playable after
+    // promotion. Drop the review-only URL so a persisted session cannot
+    // request it while the Playable preview is being restored.
+    remote.candidatePreviewUrl = null
     remote.promoteError = null
     session.phase = 'playable_ready'
   } catch (cause) {
@@ -733,7 +787,8 @@ export async function refreshRemotePlayable(projectId: string): Promise<void> {
     }
     session.remoteBuild.playableVersion = current
     session.remoteBuild.previewUrl = playablePreviewUrl(projectId, current.version_id)
-    session.phase = 'playable_ready'
+    if (session.remoteBuild.candidateId === current.candidate_id) session.remoteBuild.candidatePreviewUrl = null
+    restoreRemoteWorkspacePhase(projectId)
   } catch (cause) {
     if (session.remoteBuild) session.remoteBuild.promoteError = cause instanceof ApiClientError ? cause.message : '暂时无法读取 Playable 版本。'
   }

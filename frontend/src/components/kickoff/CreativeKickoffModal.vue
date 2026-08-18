@@ -6,12 +6,12 @@ import ChoiceQuestion from './ChoiceQuestion.vue'
 import ConfirmationState from './ConfirmationState.vue'
 import DesignReadySummary from './DesignReadySummary.vue'
 import KickoffMessage from './KickoffMessage.vue'
-import RetryState from './RetryState.vue'
 import ThinkingIndicator from './ThinkingIndicator.vue'
 import { buildScenarioSummary, getFollowUpQuestion, iterationDirections, iterationQuestions, resolveKickoffScenario } from './kickoffFixtures'
 import type { Choice, ConfirmedGameDesign, Decision, KickoffPhase, Question } from './kickoffTypes'
 import type { CreatorGameDesignDraft } from '../../contracts/creatorGameDesign'
 import { clarificationStatusForPhase, readinessForDesignStatus } from '../../contracts/designReadiness'
+import type { BrainstormInput } from '../../api/client'
 
 const props = withDefaults(
   defineProps<{
@@ -20,14 +20,18 @@ const props = withDefaults(
     templateId?: string | null
     forceMockError?: boolean
     initialDraft?: CreatorGameDesignDraft | null
+    backendMode?: boolean
+    brainstormLoading?: boolean
+    brainstormError?: string | null
   }>(),
-  { forceMockError: false, initialDraft: null },
+  { forceMockError: false, initialDraft: null, backendMode: false, brainstormLoading: false, brainstormError: null },
 )
 
 const emit = defineEmits<{
   close: []
   confirmed: [design: ConfirmedGameDesign]
   draftUpdated: [draft: CreatorGameDesignDraft]
+  brainstorm: [input: BrainstormInput]
 }>()
 
 const phase = ref<KickoffPhase>('clarifying')
@@ -43,12 +47,37 @@ const pendingTransition = ref<'next-question' | 'ready' | null>(null)
 let activeTimer: number | null = null
 
 const scenario = computed(() => resolveKickoffScenario(props.originalIdea, props.templateId))
+const projectTitle = computed(() => props.backendMode && props.initialDraft ? props.initialDraft.project_title : scenario.value.title)
 const currentQuestion = computed(() => {
+  if (props.backendMode) {
+    const question = props.initialDraft?.clarification.current_question
+    if (!question) return null
+    return {
+      id: question.id,
+      response: '',
+      prompt: question.prompt,
+      choices: question.choices.map((choice, index) => ({
+        ...choice,
+        number: String(index + 1).padStart(2, '0'),
+      })),
+    } satisfies Question
+  }
   if (questionIndex.value === 0) return scenario.value.coreQuestion
   return getFollowUpQuestion(scenario.value, decisions.value[0]?.answerId)
 })
 const iterationQuestion = computed(() => iterationQuestions[iterationDirection.value?.id ?? ''] ?? iterationQuestions.custom)
-const readySummary = computed(() => buildScenarioSummary(scenario.value, props.originalIdea, decisions.value))
+const readySummary = computed(() => {
+  if (props.backendMode && props.initialDraft) {
+    return {
+      title: props.initialDraft.summary.title,
+      summary: props.initialDraft.summary.summary,
+      highlights: [...props.initialDraft.summary.highlights],
+      coreLoop: [...props.initialDraft.summary.core_loop],
+      progression: [...props.initialDraft.summary.progression],
+    }
+  }
+  return buildScenarioSummary(scenario.value, props.originalIdea, decisions.value)
+})
 const statusLabel = computed(() => {
   if (phase.value === 'ready' || phase.value === 'iterating') return 'GAME DESIGN READY'
   if (phase.value === 'confirmed' || phase.value === 'confirming') return 'DESIGN CONFIRMATION'
@@ -72,10 +101,13 @@ function restoreDraft(draft: CreatorGameDesignDraft | null) {
       ? 'iterating'
       : draft.clarification.status === 'confirmed'
         ? 'confirmed'
-        : 'clarifying'
+        : props.backendMode && !draft.clarification.current_question
+          ? 'thinking'
+          : 'clarifying'
 }
 
 function currentDraft(): CreatorGameDesignDraft {
+  if (props.backendMode && props.initialDraft) return props.initialDraft
   const status = clarificationStatusForPhase(phase.value)
   return {
     schema_version: 1,
@@ -144,11 +176,27 @@ function finishTransition() {
 
 function chooseAnswer(choice: Choice) {
   const question = currentQuestion.value
+  if (!question) return
+  if (props.backendMode) {
+    phase.value = 'thinking'
+    emit('brainstorm', {
+      action: choice.id.startsWith('custom-') ? 'free_text' : 'answer',
+      question_id: question.id,
+      answer_id: choice.id.startsWith('custom-') ? undefined : choice.id,
+      answer: choice.title,
+    })
+    return
+  }
   decisions.value.push({ questionId: question.id, question: question.prompt, response: question.response, answerId: choice.id, answer: choice.title })
   scheduleTransition(questionIndex.value === 0 ? 'next-question' : 'ready')
 }
 
 function retry() {
+  if (props.backendMode) {
+    phase.value = 'thinking'
+    emit('brainstorm', { action: 'continue' })
+    return
+  }
   phase.value = 'thinking'
   scrollToLatest()
   clearTimer()
@@ -234,7 +282,22 @@ watch(
 watch(
   [phase, questionIndex, decisions, iterationNote],
   () => {
-    if (props.open && phase.value !== 'confirmed') emit('draftUpdated', currentDraft())
+    if (props.open && !props.backendMode && phase.value !== 'confirmed') emit('draftUpdated', currentDraft())
+  },
+  { deep: true },
+)
+
+watch(
+  () => props.brainstormError,
+  (error) => {
+    if (props.open && props.backendMode && error) phase.value = 'error'
+  },
+)
+
+watch(
+  () => props.initialDraft,
+  (draft) => {
+    if (props.open && props.backendMode && draft) restoreDraft(draft)
   },
   { deep: true },
 )
@@ -267,7 +330,7 @@ onBeforeUnmount(() => {
               <span id="kickoff-status" class="kickoff-status" :class="{ ready: phase === 'ready' }">
                 <Check v-if="phase === 'ready'" :size="13" />{{ statusLabel }}
               </span>
-              <span class="kickoff-project-name">{{ scenario.title }}</span>
+              <span class="kickoff-project-name">{{ projectTitle }}</span>
               <button ref="closeButtonRef" type="button" :disabled="phase === 'confirming'" title="关闭" aria-label="关闭创意启动对话" @click="closeModal">
                 <X :size="18" />
               </button>
@@ -292,15 +355,23 @@ onBeforeUnmount(() => {
                 <KickoffMessage role="user"><strong>{{ decision.answer }}</strong></KickoffMessage>
               </template>
 
-              <template v-if="phase === 'clarifying'">
+              <template v-if="phase === 'clarifying' && currentQuestion">
                 <KickoffMessage role="ai">
-                  <p>{{ questionIndex === 0 ? scenario.understanding : currentQuestion.response }}</p>
+                  <p>{{ props.backendMode ? '我先确认一个最影响第一版实现的决定。你可以选一个方向，也可以直接写自己的想法。' : questionIndex === 0 ? scenario.understanding : currentQuestion.response }}</p>
                 </KickoffMessage>
-                <ChoiceQuestion :question="currentQuestion" @select="chooseAnswer" />
+                <ChoiceQuestion :question="currentQuestion" :disabled="brainstormLoading" @select="chooseAnswer" />
               </template>
 
+              <ThinkingIndicator v-else-if="phase === 'clarifying'" />
+
               <ThinkingIndicator v-else-if="phase === 'thinking'" />
-              <RetryState v-else-if="phase === 'error'" @retry="retry" />
+              <KickoffMessage v-else-if="phase === 'error'" role="ai">
+                <div class="retry-state" role="alert">
+                  <strong>{{ props.brainstormError ?? '这一步没有完成。' }}</strong>
+                  <span>{{ props.backendMode ? '当前决定已经保留，可以只重试这一次 Brainstorm。' : '刚才的决定已经保留，可以只重试当前响应。' }}</span>
+                  <button type="button" @click="retry">重新尝试</button>
+                </div>
+              </KickoffMessage>
 
               <template v-else-if="phase === 'iterating'">
                 <KickoffMessage role="ai">

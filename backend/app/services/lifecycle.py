@@ -190,6 +190,16 @@ class ProjectLifecycleService:
             return ProjectStage.ARCHIVED
         if project.active_build_id:
             return ProjectStage.BUILDING
+        # An unpromoted Candidate is still the user's next decision, even when
+        # the project already has an older stable Playable. The current
+        # Playable remains safe, but it must not hide the pending Human Gate.
+        candidate = self.session.scalar(
+            select(BuildCandidate)
+            .where(BuildCandidate.project_id == project.id, BuildCandidate.status == "succeeded")
+            .order_by(BuildCandidate.created_at.desc())
+        )
+        if candidate:
+            return ProjectStage.CANDIDATE_REVIEW
         if project.current_playable_version_id:
             published = self.session.scalar(
                 select(Release).where(Release.playable_version_id == project.current_playable_version_id)
@@ -202,13 +212,6 @@ class ProjectLifecycleService:
             .where(GameSpecRevision.project_id == project.id)
             .order_by(GameSpecRevision.revision_number.desc())
         )
-        candidate = self.session.scalar(
-            select(BuildCandidate)
-            .where(BuildCandidate.project_id == project.id, BuildCandidate.status == "succeeded")
-            .order_by(BuildCandidate.created_at.desc())
-        )
-        if candidate:
-            return ProjectStage.CANDIDATE_REVIEW
         if revision and revision.status == "confirmed":
             return ProjectStage.READY_TO_BUILD
         if revision:

@@ -3,6 +3,7 @@ import { ArrowRight, BadgeCheck, Check, Clock3, Coffee, Gamepad2, Heart, History
 import { computed } from 'vue'
 import ResourceExtractionBridge from './ResourceExtractionBridge.vue'
 import { isWorkingPreviewAvailable } from './buildFixture'
+import { previewUrlForPhase } from '../../contracts/previewRouting'
 import type { BuildPhase } from './buildTypes'
 import type { ChangePhase } from './changeTypes'
 import type { ReleaseRecord } from './releaseTypes'
@@ -12,10 +13,11 @@ const props = withDefaults(defineProps<{
   phase: BuildPhase | ChangePhase
   playable?: PlayableVersionRecord | null
   realPreviewUrl?: string | null
+  candidatePreviewUrl?: string | null
   release?: ReleaseRecord | null
   resourceBridgeAcknowledged?: boolean
   resourcePendingCount?: number
-}>(), { playable: null, realPreviewUrl: null, release: null, resourceBridgeAcknowledged: false, resourcePendingCount: 0 })
+}>(), { playable: null, realPreviewUrl: null, candidatePreviewUrl: null, release: null, resourceBridgeAcknowledged: false, resourcePendingCount: 0 })
 defineEmits<{ openHistory: []; publish: []; viewRelease: []; continueDevelopment: []; resourceLater: []; resourceReview: [] }>()
 
 const changePhases: ChangePhase[] = [
@@ -29,6 +31,8 @@ const v2Ready = computed(() => props.phase === 'playable_v2_ready' || props.phas
 const ready = computed(() => props.phase === 'playable_ready' || isChangeFlow.value)
 const workingChange = computed(() => isChangeFlow.value && !['showing_recommendations', 'playing_v1', 'change_requested', 'analyzing_change', 'change_review', 'playable_v2_ready', 'version_history'].includes(props.phase))
 const available = computed(() => isChangeFlow.value || isWorkingPreviewAvailable(props.phase as BuildPhase))
+const candidatePreview = computed(() => props.phase === 'candidate_ready' && Boolean(props.candidatePreviewUrl))
+const previewUrl = computed(() => previewUrlForPhase(props.phase, props.candidatePreviewUrl, props.realPreviewUrl))
 const snapshot = computed(() => props.playable?.snapshot ?? null)
 const projectTitle = computed(() => snapshot.value?.projectTitle ?? '当前项目')
 const playableVersion = computed(() => props.playable?.version ?? 0)
@@ -72,9 +76,9 @@ const relationshipSummary = computed(() => snapshot.value?.relationshipSummary ?
       <button v-if="release" type="button" @click="$emit('continueDevelopment')">继续开发 <ArrowRight :size="13" /></button>
     </div>
 
-    <div v-if="props.realPreviewUrl" class="farm-preview-frame real-preview-frame">
-      <iframe :src="props.realPreviewUrl" title="当前 Playable 游戏预览" sandbox="allow-scripts allow-same-origin"></iframe>
-      <div class="playable-seal"><BadgeCheck :size="15" />REAL PLAYABLE</div>
+    <div v-if="previewUrl" class="farm-preview-frame real-preview-frame">
+      <iframe :src="previewUrl" :title="candidatePreview ? 'Candidate 人工试玩预览' : '当前 Playable 游戏预览'" sandbox="allow-scripts allow-same-origin"></iframe>
+      <div class="playable-seal"><BadgeCheck :size="15" />{{ candidatePreview ? 'REAL CANDIDATE' : 'REAL PLAYABLE' }}</div>
     </div>
     <div v-else class="farm-preview-frame" :class="`preview-variant-${previewVariant}`">
       <img v-if="previewVariant === 'farm'" src="/farm-game-preview.png" :alt="`${projectTitle} 游戏画面`" />
@@ -94,7 +98,7 @@ const relationshipSummary = computed(() => snapshot.value?.relationshipSummary ?
       <div><span>已可体验</span><p v-for="capability in capabilities" :key="capability"><Check :size="13" />{{ capability }}</p><p v-if="!capabilities.length"><Check :size="13" />核心互动</p></div>
       <div v-if="!ready"><span>仍在制作</span><p><LoaderCircle :size="13" class="spin" />关系反馈</p><p><Sprout :size="13" />更多内容</p></div>
       <div v-else><span>验证结果</span><p><BadgeCheck :size="13" />{{ v2Ready ? '关系反馈增强' : '核心经营闭环' }}</p><p><BadgeCheck :size="13" />{{ v2Ready ? '回归检查通过' : '关系与代际目标' }}</p></div>
-      <div class="preview-runtime-note"><Gamepad2 :size="15" /><span><strong>{{ props.realPreviewUrl ? 'Real playable preview' : 'Static prototype preview' }}</strong>{{ props.realPreviewUrl ? '当前画面来自已 Promote 的真实构建产物' : '本画面不运行真实 Phaser 游戏' }}</span></div>
+      <div class="preview-runtime-note"><Gamepad2 :size="15" /><span><strong>{{ previewUrl ? (candidatePreview ? 'Real candidate preview' : 'Real playable preview') : 'Static prototype preview' }}</strong>{{ previewUrl ? (candidatePreview ? '当前画面来自待审核 Candidate，不会覆盖当前 Playable' : '当前画面来自已 Promote 的真实构建产物') : '本画面不运行真实 Phaser 游戏' }}</span></div>
     </div>
     <ResourceExtractionBridge v-if="release" :acknowledged="resourceBridgeAcknowledged" :pending-count="resourcePendingCount" @later="$emit('resourceLater')" @review="$emit('resourceReview')" />
   </article>

@@ -41,6 +41,7 @@ import {
   refreshRemoteCandidateTest,
   refreshRemoteHumanReview,
   refreshRemotePlayable,
+  restoreRemoteWorkspacePhase,
   reviewRemoteCandidate,
   promoteRemoteCandidate,
   rebuildRemoteCandidate,
@@ -181,6 +182,10 @@ function evidenceObserved(evidence: { observed: string }) {
 watch(phase, (nextPhase) => {
   if (nextPhase === 'spec_confirmed' || nextPhase === 'candidate_ready') activeTab.value = 'build'
   else if (previewPhases.includes(nextPhase) || nextPhase === 'scope_violation') activeTab.value = 'preview'
+})
+
+watch(() => session.remoteBuild?.testGateStatus, (status) => {
+  if (status === 'ready' && phase.value === 'candidate_ready') activeTab.value = 'build'
 })
 
 function useRelationshipResource() {
@@ -421,12 +426,10 @@ onMounted(async () => {
               await refreshRemoteCandidateTest(session.id)
               await refreshRemoteHumanReview(session.id)
             }
-            if (session.remoteBuild?.playableVersion) {
-              activeTab.value = 'preview'
-              setWorkspacePhase(session.id, 'playable_ready')
-            } else if (session.remoteBuild?.buildId) {
-              activeTab.value = session.remoteBuild.status === 'succeeded' ? 'build' : 'preview'
-            } else {
+            const restoredRoute = restoreRemoteWorkspacePhase(session.id)
+            if (restoredRoute === 'playable') activeTab.value = 'preview'
+            else if (restoredRoute === 'candidate' || restoredRoute === 'building' || restoredRoute === 'error') activeTab.value = 'build'
+            else {
               void startRemoteBuild(session.id)
             }
           } else if (getCurrentPlayable(session)) setWorkspacePhase(session.id, 'playable_ready')
@@ -548,6 +551,17 @@ onBeforeUnmount(() => {
               <span><strong>{{ evidenceLabels[evidence.kind] ?? evidence.kind }}</strong><small>{{ evidenceObserved(evidence) }}</small></span>
             </li>
           </ul>
+          <section v-if="session.remoteBuild?.candidatePreviewUrl" class="candidate-live-preview" aria-label="Candidate 人工试玩预览">
+            <header>
+              <div><strong>Candidate 人工试玩</strong><span>这是待审核构建，不会覆盖当前 Playable</span></div>
+              <Gamepad2 :size="16" />
+            </header>
+            <iframe
+              :src="session.remoteBuild.candidatePreviewUrl"
+              title="Candidate 人工试玩预览"
+              sandbox="allow-scripts allow-same-origin"
+            ></iframe>
+          </section>
           <section class="human-play-gate" :class="`is-${session.remoteBuild?.humanReview?.decision ?? 'pending'}`" aria-label="Human Play Review">
             <div class="human-play-gate-heading">
               <ShieldCheck :size="18" />
@@ -632,6 +646,7 @@ onBeforeUnmount(() => {
           :phase="phase as BuildPhase | ChangePhase"
           :playable="playable"
           :real-preview-url="session.remoteBuild?.previewUrl"
+          :candidate-preview-url="session.remoteBuild?.candidatePreviewUrl"
           :release="currentRelease"
           :resource-bridge-acknowledged="resourceBridgeAcknowledged"
           :resource-pending-count="resourcePendingCount"

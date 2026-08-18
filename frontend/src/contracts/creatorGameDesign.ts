@@ -21,6 +21,17 @@ export type CreatorGameDesignDraft = {
     question_index: number
     status: 'clarifying' | 'ready' | 'iterating' | 'confirmed'
     custom_input: string
+    current_question?: {
+      id: string
+      prompt: string
+      input_hint?: string
+      choices: Array<{
+        id: string
+        title: string
+        description: string
+        recommended?: boolean
+      }>
+    } | null
   }
   readiness?: DesignReadiness
 }
@@ -30,4 +41,6 @@ export type DesignReadiness = {
   blockers: string[]
   unresolved_decisions: string[]
   checked_at?: string | null
+  first_playable_ready?: boolean
+  full_gdd_ready?: boolean
 }

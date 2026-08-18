@@ -13,7 +13,7 @@ import CreativeKickoffModal from '../components/kickoff/CreativeKickoffModal.vue
 import type { ConfirmedGameDesign } from '../components/kickoff/kickoffTypes'
 import type { ProjectSession } from '../stores/projectStore'
 import { runtimeConfig } from '../stores/projectStore'
-import { ApiClientError, confirmProjectDesign, createProjectRecord, getProjectDesign, saveProjectDesign } from '../api/client'
+import { ApiClientError, brainstormProjectDesign, confirmProjectDesign, createProjectRecord, getProjectDesign, type BrainstormInput } from '../api/client'
 import type { ProjectResponse } from '../api/client'
 import type { CreatorGameDesignDraft } from '../contracts/creatorGameDesign'
 
@@ -83,6 +83,8 @@ const kickoffStarted = ref(false)
 const kickoffOpen = ref(false)
 const kickoffIdea = ref('')
 const kickoffDraft = ref<CreatorGameDesignDraft | null>(null)
+const brainstormLoading = ref(false)
+const brainstormError = ref<string | null>(null)
 const backendProjectId = ref<string | null>(null)
 const idempotencyKey = ref<string | null>(null)
 const creatorRef = ref<HTMLElement | null>(null)
@@ -145,9 +147,13 @@ watch(
     kickoffIdea.value = record.original_idea
     idea.value = record.original_idea
     try {
-      kickoffDraft.value = (await getProjectDesign(projectId)).draft
+      const design = await getProjectDesign(projectId)
+      kickoffDraft.value = design.draft
       kickoffStarted.value = true
       kickoffOpen.value = true
+      if (design.status !== 'confirmed' && !design.draft.clarification.current_question) {
+        await requestBrainstorm({ action: 'start' })
+      }
       emit('resumeConsumed')
     } catch (cause) {
       error.value = cause instanceof ApiClientError ? cause.message : '暂时无法恢复这次设计澄清。'
@@ -224,17 +230,29 @@ async function createProject() {
       return
     }
     kickoffStarted.value = true
+    kickoffOpen.value = true
+  }
+  if (backendProjectId.value && !kickoffDraft.value?.clarification.current_question && kickoffDraft.value?.clarification.status !== 'ready') {
+    await requestBrainstorm({ action: 'start' })
   }
   kickoffOpen.value = true
 }
 
-async function saveKickoffDraft(draft: CreatorGameDesignDraft) {
+function saveKickoffDraft(draft: CreatorGameDesignDraft) {
   kickoffDraft.value = draft
+}
+
+async function requestBrainstorm(input: BrainstormInput) {
   if (!backendProjectId.value) return
+  brainstormLoading.value = true
+  brainstormError.value = null
   try {
-    await saveProjectDesign(backendProjectId.value, draft)
+    const response = await brainstormProjectDesign(backendProjectId.value, input)
+    kickoffDraft.value = response.draft
   } catch (cause) {
-    error.value = cause instanceof ApiClientError ? cause.message : '暂时无法保存这次澄清，请稍后重试。'
+    brainstormError.value = cause instanceof ApiClientError ? cause.message : '暂时无法继续这次设计澄清。'
+  } finally {
+    brainstormLoading.value = false
   }
 }
 
@@ -397,8 +415,12 @@ function onIdeaKeydown(event: KeyboardEvent) {
       :template-id="selectedTemplateId"
       :force-mock-error="forceMockError"
       :initial-draft="kickoffDraft"
+      :backend-mode="Boolean(backendProjectId)"
+      :brainstorm-loading="brainstormLoading"
+      :brainstorm-error="brainstormError"
       @close="closeKickoff"
       @draft-updated="saveKickoffDraft"
+      @brainstorm="requestBrainstorm"
       @confirmed="enterWorkspace"
     />
   </div>

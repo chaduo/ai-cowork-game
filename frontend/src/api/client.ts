@@ -62,6 +62,19 @@ export interface DesignResponse {
   confirmed_at: string | null
   readiness: DesignReadiness
   draft: CreatorGameDesignDraft
+  next_question?: {
+    id: string
+    prompt: string
+    input_hint?: string
+    choices: Array<{ id: string; title: string; description: string; recommended?: boolean }>
+  } | null
+}
+
+export interface BrainstormInput {
+  action: 'start' | 'answer' | 'free_text' | 'continue'
+  question_id?: string
+  answer_id?: string
+  answer?: string
 }
 
 export interface GameSpecResponse {
@@ -221,6 +234,14 @@ export function confirmProjectDesign(projectId: string): Promise<DesignResponse>
   return request<DesignResponse>(`/v1/projects/${encodeURIComponent(projectId)}/design/confirm`, { method: 'POST' })
 }
 
+export function brainstormProjectDesign(projectId: string, input: BrainstormInput): Promise<DesignResponse> {
+  return request<DesignResponse>(`/v1/projects/${encodeURIComponent(projectId)}/design/brainstorm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+}
+
 export function getProjectGameSpec(projectId: string): Promise<GameSpecResponse> {
   return request<GameSpecResponse>(`/v1/projects/${encodeURIComponent(projectId)}/gamespec`)
 }
@@ -303,6 +324,10 @@ export function listPlayableVersions(projectId: string): Promise<PlayableVersion
 
 export function playablePreviewUrl(projectId: string, versionId: string): string {
   return `/api/v1/projects/${encodeURIComponent(projectId)}/playable-versions/${encodeURIComponent(versionId)}/preview`
+}
+
+export function candidatePreviewUrl(projectId: string, candidateId: string): string {
+  return `/api/v1/projects/${encodeURIComponent(projectId)}/candidates/${encodeURIComponent(candidateId)}/preview`
 }
 
 export function linkBuildCandidateRepair(parentCandidateId: string, replacementCandidateId: string): Promise<CandidateResponse> {

@@ -89,7 +89,7 @@ function hydrateProjectSession(record: ProjectResponse) {
       errorMessage: null,
       testGateStatus: record.candidate_review.test_gate_status,
     })
-  } else if (!record.current_playable && record.latest_build) {
+  } else if (record.latest_build && (record.stage === 'building' || !record.current_playable)) {
     hydrateRemoteBuild(session.id, {
       buildId: record.latest_build.build_id,
       runId: record.latest_build.run_id,

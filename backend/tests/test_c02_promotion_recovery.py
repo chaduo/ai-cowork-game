@@ -34,6 +34,22 @@ def test_promote_requires_pass_and_publish_is_explicit(isolated_database) -> Non
         assert service.derive_project_stage(project.id) == ProjectStage.PUBLISHED
 
 
+def test_new_candidate_review_takes_precedence_over_an_existing_playable(isolated_database) -> None:
+    with Session(isolated_database) as session:
+        service, project = confirmed_service(session)
+        first_build = service.start_build(project.id)
+        first_candidate = service.finish_build(first_build.id, "succeeded", summary="first", artifact_path="dist/index.html")
+        first_candidate.artifact_checksum = "a" * 64
+        asyncio.run(CandidateTestService(session, FakeCandidateTestRunner("pass")).test_candidate(first_candidate.id))
+        service.record_human_play_review(first_candidate.id, decision="accepted")
+        service.promote_candidate(first_candidate.id, git_commit="first-commit")
+
+        second_build = service.start_build(project.id)
+        service.finish_build(second_build.id, "succeeded", summary="second", artifact_path="dist/index.html")
+
+        assert service.derive_project_stage(project.id) == ProjectStage.CANDIDATE_REVIEW
+
+
 def test_promotion_rejects_non_passing_verdict(isolated_database) -> None:
     with Session(isolated_database) as session:
         service, project = confirmed_service(session)

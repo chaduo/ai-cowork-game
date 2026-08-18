@@ -67,6 +67,59 @@ def _session(request: Request) -> Session:
     return Session(request.app.state.engine)
 
 
+def _serve_candidate_artifact(
+    *,
+    candidate: BuildCandidate,
+    session: Session,
+    not_ready_code: str,
+) -> FileResponse:
+    if candidate.status != "succeeded" or candidate.test_gate_status != "ready":
+        raise ApiError(not_ready_code, "Candidate is not ready for human play", [], 409)
+
+    build = session.get(Build, candidate.build_id)
+    run = session.scalar(
+        select(Run).where(Run.build_id == build.id).order_by(Run.created_at.desc())
+    ) if build else None
+    if run is None or not run.workspace_path:
+        raise ApiError("preview_not_found", "Candidate preview is not available", [], 404)
+
+    root = Path(run.workspace_path)
+    try:
+        relative_path = WorkspaceManager().validate_member(root, candidate.artifact_path or "")
+    except WorkspaceEscapeError as cause:
+        raise ApiError(
+            "preview_path_rejected",
+            "Candidate preview path is not allowed",
+            [{"code": cause.code}],
+            409,
+        ) from cause
+
+    if Path(relative_path).name != "index.html":
+        raise ApiError("preview_not_found", "Candidate preview is not available", [], 404)
+
+    artifact = (root.resolve() / relative_path).resolve()
+    if not artifact.is_file():
+        raise ApiError("preview_not_found", "Candidate preview is not available", [], 404)
+    return FileResponse(
+        artifact,
+        media_type="text/html",
+        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+    )
+
+
+@router.get("/projects/{project_id}/candidates/{candidate_id}/preview")
+def preview_candidate(project_id: str, candidate_id: str, request: Request) -> FileResponse:
+    with _session(request) as session:
+        candidate = session.get(BuildCandidate, candidate_id)
+        if candidate is None or candidate.project_id != project_id:
+            raise ApiError("candidate_not_found", "Candidate not found", [], 404)
+        return _serve_candidate_artifact(
+            candidate=candidate,
+            session=session,
+            not_ready_code="candidate_preview_not_ready",
+        )
+
+
 @router.get("/projects/{project_id}/playable-versions/{version_id}/preview")
 def preview_playable_version(project_id: str, version_id: str, request: Request) -> FileResponse:
     with _session(request) as session:
