@@ -17,6 +17,7 @@ import {
   createProjectBuild,
   getBuildCandidateTestReport,
   getHumanPlayReview,
+  listProjectReleases,
   getProjectBuild,
   linkBuildCandidateRepair,
   listPlayableVersions,
@@ -29,6 +30,7 @@ import {
   type HumanPlayReviewResponse,
   type PlayableVersionResponse,
 } from '../api/client'
+import { mapReleaseResponse, type ReleaseApiResponse } from '../contracts/releaseMapping'
 import type {
   CoworkMessage,
   GameSpecModel,
@@ -160,8 +162,33 @@ export function getCurrentRelease(session: ProjectSession): ReleaseRecord | null
 export function getPendingResourceCount(session: ProjectSession): number {
   const release = getCurrentRelease(session)
   if (!release) return 0
+  if (session.backendProjectId) return release.resourceCandidateCount ?? 0
   const batch = session.resourceBatches[release.id] ?? []
   return batch.filter((item) => item.state === 'pending' || item.state === 'saving').length
+}
+
+export function hydrateRemoteReleases(projectId: string, records: ReleaseApiResponse[]): void {
+  const session = getProject(projectId)
+  if (!session || !session.backendProjectId) return
+  session.releases = records
+    .map(mapReleaseResponse)
+    .sort((left, right) => left.version - right.version)
+  // Remote release batches are authoritative. Do not let a local demo fixture
+  // manufacture candidates for a persisted Project.
+  session.resourceBatches = {}
+  touchProject(session)
+}
+
+export async function refreshRemoteReleases(projectId: string): Promise<void> {
+  const session = getProject(projectId)
+  if (!session?.backendProjectId) return
+  try {
+    const records = await listProjectReleases(session.backendProjectId)
+    hydrateRemoteReleases(projectId, records)
+  } catch {
+    // The Workspace can still render the known Project/Playable state while a
+    // transient Release read is retried by the next explicit navigation.
+  }
 }
 
 export function extractCandidatesForRelease(projectId: string, releaseId: string): ResourceBatchItem[] {

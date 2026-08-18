@@ -11,6 +11,7 @@ from app.models import (
     Build,
     BuildCandidate,
     GameDesign,
+    GameDesignRevision,
     GameSpecRevision,
     PlayableVersion,
     Project,
@@ -39,6 +40,9 @@ class ReleaseResponse(BaseModel):
     description: str
     game_design_revision_id: str | None
     gamespec_revision_id: str | None
+    playable_number: int | None
+    game_design_revision_number: int | None
+    gamespec_revision_number: int | None
     artifact_path: str | None
     artifact_checksum: str | None
     git_commit: str | None
@@ -84,6 +88,12 @@ def _batch(session: Session, release: Release) -> ResourceExtractionBatch:
 
 def _release_response(session: Session, release: Release) -> ReleaseResponse:
     batch = _batch(session, release)
+    playable = session.get(PlayableVersion, release.playable_version_id)
+    gamespec_revision = session.get(GameSpecRevision, release.gamespec_revision_id) if release.gamespec_revision_id else None
+    design_revision_number: int | None = None
+    if release.game_design_revision_id:
+        design_revision = session.get(GameDesignRevision, release.game_design_revision_id)
+        design_revision_number = design_revision.revision_number if design_revision else None
     return ReleaseResponse(
         id=release.id,
         project_id=release.project_id,
@@ -94,6 +104,9 @@ def _release_response(session: Session, release: Release) -> ReleaseResponse:
         description=release.description or "",
         game_design_revision_id=release.game_design_revision_id,
         gamespec_revision_id=release.gamespec_revision_id,
+        playable_number=playable.number if playable else None,
+        game_design_revision_number=design_revision_number,
+        gamespec_revision_number=gamespec_revision.revision_number if gamespec_revision else None,
         artifact_path=release.artifact_path,
         artifact_checksum=release.artifact_checksum,
         git_commit=release.git_commit,

@@ -6,7 +6,7 @@ import MyResources from './screens/MyResources.vue'
 import ResourceReviewWorkspace from './screens/ResourceReviewWorkspace.vue'
 import type { ConfirmedGameDesign } from './components/kickoff/kickoffTypes'
 import type { ReleaseRecord } from './components/workspace/releaseTypes'
-import { appendPlayableVersion, bindBackendProject, completeGeneration, configureDemoRuntime, createProject, getActiveProject, getPendingResourceCount, hydrateRemoteBuild, openProject, projectStore, setProjectDesignStatus, startGeneration, updateSavedResourceMetadata } from './stores/projectStore'
+import { appendPlayableVersion, bindBackendProject, completeGeneration, configureDemoRuntime, createProject, getActiveProject, getPendingResourceCount, hydrateRemoteBuild, openProject, projectStore, refreshRemoteReleases, setProjectDesignStatus, startGeneration, updateSavedResourceMetadata } from './stores/projectStore'
 import { seedDemo, type AppSurface } from './stores/demoSeeds'
 import { getProjectDesign, getProjectRecord, listProjectRecords, type ProjectResponse } from './api/client'
 
@@ -122,9 +122,10 @@ onMounted(async () => {
   try {
     const records = await listProjectRecords()
     projectRecords.value = records
-    for (const record of records) {
-      hydrateProjectSession(record)
-    }
+    await Promise.all(records.map(async (record) => {
+      const session = hydrateProjectSession(record)
+      await refreshRemoteReleases(session.id)
+    }))
     projectStore.activeProjectId = null
   } catch {
     projectListError.value = '暂时无法加载项目列表，请确认后端已启动。'
@@ -177,6 +178,7 @@ async function openWorkspace(projectId: string) {
     const record = await getProjectRecord(projectId)
     upsertProjectRecord(record)
     hydrateProjectSession(record)
+    await refreshRemoteReleases(projectId)
   } catch {
     if (!openProject(projectId)) {
       projectListError.value = '找不到这个项目，可能已经被移除或暂时不可用。'
