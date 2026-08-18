@@ -17,6 +17,7 @@ from app.models import (
     PlayableVersion,
     Project,
     Release,
+    ResourceExtractionBatch,
     TestReport,
     utc_now,
 )
@@ -396,7 +397,23 @@ class ProjectLifecycleService:
         release = Release(project_id=project.id, playable_version_id=version.id, number=latest_number + 1)
         self.session.add(release)
         self.session.flush()
+        self.ensure_resource_extraction_batch(release)
         return release
+
+    def ensure_resource_extraction_batch(self, release: Release) -> ResourceExtractionBatch:
+        existing = self.session.scalar(
+            select(ResourceExtractionBatch).where(ResourceExtractionBatch.release_id == release.id)
+        )
+        if existing:
+            return existing
+        batch = ResourceExtractionBatch(
+            release_id=release.id,
+            status="empty",
+            candidate_count=0,
+        )
+        self.session.add(batch)
+        self.session.flush()
+        return batch
 
     def recover_orphaned_builds(self) -> int:
         builds = list(self.session.scalars(select(Build).where(Build.status.in_(("pending", "running", "cancelling")))))

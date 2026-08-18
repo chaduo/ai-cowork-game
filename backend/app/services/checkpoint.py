@@ -177,6 +177,15 @@ class CheckpointService:
         """
         release = self._lifecycle.publish_version(version_id)
         if release.git_commit:
+            # C16's lifecycle snapshot already carries the real commit. Ensure
+            # the human-readable tag exists as well, without creating a second
+            # commit or Release on retries.
+            self._git.init_project(release.project_id)
+            self._git.tag(
+                release.project_id,
+                name=f"release-{release.number}",
+                sha=release.git_commit,
+            )
             return release  # already checkpointed (idempotent)
         version = self.session.get(PlayableVersion, version_id)
         if version is None or not version.git_commit:
