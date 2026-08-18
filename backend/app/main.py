@@ -14,6 +14,7 @@ from app.api.runs import router as runs_router
 from app.api.builds import router as builds_router
 from app.api.candidates import router as candidates_router
 from app.api.playables import router as playables_router
+from app.api.releases import router as releases_router
 from app.agents.fake_game_agent import FakeGameAgent
 from app.agents.fake_game_design_planner import FakeGameDesignPlanner
 from app.agents.fake_candidate_test_runner import FakeCandidateTestRunner
@@ -21,6 +22,7 @@ from app.agents.openai_game_design_planner import OpenAICompatibleGameDesignPlan
 from app.agents.opengame_adapter import OpenGameAdapter
 from app.agents.subprocess_executor import AsyncSubprocessExecutor
 from app.services.builds import BuildService
+from app.services.project_git import ProjectGitService
 from sqlalchemy.orm import Session
 from app.db import create_engine_for
 
@@ -49,6 +51,9 @@ def create_app(
     app = FastAPI(title="AI Cowork Game API", version=APPLICATION_VERSION, lifespan=lifespan)
     app.state.settings = settings
     app.state.engine = create_engine_for(settings)
+    # Keep the trusted Project Git root injectable for isolated API tests while
+    # production uses the same deterministic default as C20 checkpoints.
+    app.state.project_git = ProjectGitService()
     if game_design_planner is not None:
         app.state.game_design_planner = game_design_planner
     elif settings.game_design_provider == "fake":
@@ -93,6 +98,7 @@ def create_app(
     app.include_router(builds_router)
     app.include_router(candidates_router)
     app.include_router(playables_router)
+    app.include_router(releases_router)
 
     @app.middleware("http")
     async def add_request_id(request: Request, call_next):

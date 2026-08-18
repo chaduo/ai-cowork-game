@@ -306,7 +306,39 @@ class Release(Base):
     playable_version_id: Mapped[str] = mapped_column(ForeignKey("playable_versions.id"), nullable=False)
     number: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="published")
+    # C16: publish-time snapshot fields. They are nullable for rows created by
+    # pre-C16 migrations; every new API-created Release fills them atomically.
+    name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    game_design_revision_id: Mapped[str | None] = mapped_column(
+        ForeignKey("game_design_revisions.id"), nullable=True
+    )
+    gamespec_revision_id: Mapped[str | None] = mapped_column(
+        ForeignKey("game_spec_revisions.id"), nullable=True
+    )
+    artifact_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    artifact_checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
     # C20 line-114: publish-time git checkpoint snapshot (CheckpointService.publish) so a
     # Release resolves to an immutable commit, not only transitively via PlayableVersion.
     git_commit: Mapped[str | None] = mapped_column(String(128), nullable=True)
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class ResourceExtractionBatch(Base):
+    """C16 boundary record for post-publish resource extraction.
+
+    C16 does not invent ResourceCandidate rows. A batch with zero candidates is
+    an honest result and gives C17 a durable release-scoped attachment point.
+    """
+
+    __tablename__ = "resource_extraction_batches"
+    __table_args__ = (UniqueConstraint("release_id", name="uq_resource_extraction_batch_release"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    release_id: Mapped[str] = mapped_column(ForeignKey("releases.id"), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="empty")
+    candidate_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)

@@ -17,10 +17,13 @@ import {
   createProjectBuild,
   getBuildCandidateTestReport,
   getHumanPlayReview,
+  getPublishReview,
+  listProjectReleases,
   getProjectBuild,
   linkBuildCandidateRepair,
   listPlayableVersions,
   playablePreviewUrl,
+  publishProjectRelease,
   promoteBuildCandidate,
   recordHumanPlayReview,
   testBuildCandidate,
@@ -28,7 +31,9 @@ import {
   type CandidateTestReportResponse,
   type HumanPlayReviewResponse,
   type PlayableVersionResponse,
+  type PublishReviewResponse,
 } from '../api/client'
+import { mapReleaseResponse, releaseDraftFromReview, type ReleaseApiResponse } from '../contracts/releaseMapping'
 import type {
   CoworkMessage,
   GameSpecModel,
@@ -67,6 +72,7 @@ export type ProjectSession = {
   gamespecRevisionId: string | null
   gamespecGitCommit: string | null
   remoteBuild: RemoteBuildState | null
+  remoteRelease: RemoteReleaseState | null
 }
 
 export type RemoteBuildState = {
@@ -90,6 +96,11 @@ export type RemoteBuildState = {
   promoteRunning?: boolean
   promoteError?: string | null
   buildContextHash?: string | null
+}
+
+export type RemoteReleaseState = PublishReviewResponse & {
+  publishRunning: boolean
+  publishError: string | null
 }
 
 export type ProjectStore = {
@@ -160,8 +171,33 @@ export function getCurrentRelease(session: ProjectSession): ReleaseRecord | null
 export function getPendingResourceCount(session: ProjectSession): number {
   const release = getCurrentRelease(session)
   if (!release) return 0
+  if (session.backendProjectId) return release.resourceCandidateCount ?? 0
   const batch = session.resourceBatches[release.id] ?? []
   return batch.filter((item) => item.state === 'pending' || item.state === 'saving').length
+}
+
+export function hydrateRemoteReleases(projectId: string, records: ReleaseApiResponse[]): void {
+  const session = getProject(projectId)
+  if (!session || !session.backendProjectId) return
+  session.releases = records
+    .map(mapReleaseResponse)
+    .sort((left, right) => left.version - right.version)
+  // Remote release batches are authoritative. Do not let a local demo fixture
+  // manufacture candidates for a persisted Project.
+  session.resourceBatches = {}
+  touchProject(session)
+}
+
+export async function refreshRemoteReleases(projectId: string): Promise<void> {
+  const session = getProject(projectId)
+  if (!session?.backendProjectId) return
+  try {
+    const records = await listProjectReleases(session.backendProjectId)
+    hydrateRemoteReleases(projectId, records)
+  } catch {
+    // The Workspace can still render the known Project/Playable state while a
+    // transient Release read is retried by the next explicit navigation.
+  }
 }
 
 export function extractCandidatesForRelease(projectId: string, releaseId: string): ResourceBatchItem[] {
@@ -419,6 +455,7 @@ export function createProjectSession(design: ConfirmedGameDesign, projectId?: st
     gamespecRevisionId: null,
     gamespecGitCommit: null,
     remoteBuild: null,
+    remoteRelease: null,
   }
 }
 
@@ -1154,6 +1191,84 @@ export function prepareReleaseReview(projectId: string): void {
   session.releasePhase = 'review'
   createReleaseDraftForProject(projectId)
   touchProject(session)
+}
+
+export async function prepareRemoteReleaseReview(projectId: string): Promise<boolean> {
+  const session = getProject(projectId)
+  if (!session?.backendProjectId) return false
+  try {
+    const review = await getPublishReview(session.backendProjectId)
+    session.remoteRelease = { ...review, publishRunning: false, publishError: null }
+    if (review.eligible) {
+      Object.assign(
+        session.releaseDraft,
+        releaseDraftFromReview(
+          review,
+          session.spec.title,
+          session.spec.buildTarget.goal || '基于最新稳定 Playable 的正式版本。',
+        ),
+      )
+      session.releasePhase = 'review'
+    } else {
+      session.releasePhase = 'error'
+    }
+    touchProject(session)
+    return review.eligible
+  } catch (cause) {
+    session.remoteRelease = {
+      project_id: session.backendProjectId,
+      eligible: false,
+      reason: cause instanceof ApiClientError ? cause.code : 'publish_review_failed',
+      next_release_number: session.releases.length + 1,
+      playable_version_id: null,
+      playable_number: null,
+      game_design_revision_id: null,
+      gamespec_revision_id: null,
+      game_design_revision_number: null,
+      gamespec_revision_number: null,
+      artifact_path: null,
+      artifact_checksum: null,
+      git_commit: null,
+      existing_release: null,
+      publishRunning: false,
+      publishError: cause instanceof ApiClientError ? cause.message : '暂时无法读取发布资格。',
+    }
+    session.releasePhase = 'error'
+    touchProject(session)
+    return false
+  }
+}
+
+export async function publishRemoteRelease(projectId: string): Promise<void> {
+  const session = getProject(projectId)
+  const remote = session?.remoteRelease
+  if (!session?.backendProjectId || !remote?.eligible || !remote.playable_version_id || remote.publishRunning) return
+  remote.publishRunning = true
+  remote.publishError = null
+  session.releasePhase = 'publishing'
+  touchProject(session)
+  try {
+    const response = await publishProjectRelease(session.backendProjectId, {
+      playableVersionId: remote.playable_version_id,
+      name: session.releaseDraft.name,
+      description: session.releaseDraft.description,
+    })
+    const release = mapReleaseResponse(response)
+    session.releases = [...session.releases.filter((item) => item.id !== release.id), release]
+      .sort((left, right) => left.version - right.version)
+    session.resourceBatches = {}
+    remote.publishRunning = false
+    remote.eligible = false
+    remote.reason = 'already_published'
+    remote.existing_release = response
+    session.releasePhase = 'success'
+    touchProject(session)
+  } catch (cause) {
+    remote.publishRunning = false
+    remote.publishError = cause instanceof ApiClientError ? cause.message : 'Release 创建失败，请稍后重试。'
+    session.releasePhase = 'error'
+    touchProject(session)
+  }
 }
 
 export function seedPublishedRelease(projectId: string): ReleaseRecord | null {

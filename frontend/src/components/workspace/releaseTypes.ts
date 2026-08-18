@@ -10,6 +10,14 @@ export type ReleaseRecord = {
   basedOnGameSpec: number
   status: 'published'
   createdAt: string
+  playableVersionId?: string
+  gameDesignRevisionId?: string | null
+  gamespecRevisionId?: string | null
+  artifactPath?: string | null
+  artifactChecksum?: string | null
+  gitCommit?: string | null
+  resourceBatchStatus?: string
+  resourceCandidateCount?: number
 }
 
 export type ReleaseDraft = Omit<ReleaseRecord, 'id' | 'status' | 'createdAt'>

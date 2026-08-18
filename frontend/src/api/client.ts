@@ -1,5 +1,6 @@
 import type { CreatorGameDesignDraft, DesignReadiness } from '../contracts/creatorGameDesign'
 import type { CreatorGameSpec } from '../contracts/creatorGameSpec'
+import type { ReleaseApiResponse } from '../contracts/releaseMapping'
 
 export interface HealthResponse {
   status: 'ok'
@@ -173,6 +174,23 @@ export interface PlayableVersionResponse {
   is_current: boolean
 }
 
+export interface PublishReviewResponse {
+  project_id: string
+  eligible: boolean
+  reason: string | null
+  next_release_number: number
+  playable_version_id: string | null
+  playable_number: number | null
+  game_design_revision_id: string | null
+  gamespec_revision_id: string | null
+  game_design_revision_number: number | null
+  gamespec_revision_number: number | null
+  artifact_path: string | null
+  artifact_checksum: string | null
+  git_commit: string | null
+  existing_release: ReleaseApiResponse | null
+}
+
 export class ApiClientError extends Error {
   readonly code: string
   readonly requestId: string
@@ -335,5 +353,32 @@ export function linkBuildCandidateRepair(parentCandidateId: string, replacementC
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ replacement_candidate_id: replacementCandidateId }),
+  })
+}
+
+export function getPublishReview(projectId: string): Promise<PublishReviewResponse> {
+  return request<PublishReviewResponse>(`/v1/projects/${encodeURIComponent(projectId)}/publish-review`)
+}
+
+export function listProjectReleases(projectId: string): Promise<ReleaseApiResponse[]> {
+  return request<ReleaseApiResponse[]>(`/v1/projects/${encodeURIComponent(projectId)}/releases`)
+}
+
+export function getProjectRelease(projectId: string, releaseId: string): Promise<ReleaseApiResponse> {
+  return request<ReleaseApiResponse>(`/v1/projects/${encodeURIComponent(projectId)}/releases/${encodeURIComponent(releaseId)}`)
+}
+
+export function publishProjectRelease(
+  projectId: string,
+  input: { playableVersionId: string; name: string; description: string },
+): Promise<ReleaseApiResponse> {
+  return request<ReleaseApiResponse>(`/v1/projects/${encodeURIComponent(projectId)}/releases`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      playable_version_id: input.playableVersionId,
+      name: input.name,
+      description: input.description,
+    }),
   })
 }
