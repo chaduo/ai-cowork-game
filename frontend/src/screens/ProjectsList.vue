@@ -62,7 +62,7 @@ function displayStage(stage: string): string {
 <template>
   <div class="k01-page projects-page">
     <header class="k01-header">
-      <button class="k01-brand" type="button" aria-label="开始创作" @click="emit('creator')">
+      <button class="k01-brand" type="button" aria-label="回到创作台" title="回到创作台" @click="emit('creator')">
         <span class="k01-brand-mark"><Gamepad2 :size="18" stroke-width="1.8" /></span>
         <span>AI Cowork Game</span>
       </button>

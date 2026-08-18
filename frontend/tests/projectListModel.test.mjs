@@ -23,3 +23,12 @@ test('project list labels creation separately from the last update', () => {
   assert.equal(creationLabel(Date.parse('2026-08-18T11:52:00Z'), now), `刚创建 · ${expectedTime}`)
   assert.equal(relativeUpdatedLabel(Date.parse('2026-08-18T11:30:00Z'), now), '30 分钟前更新')
 })
+
+test('sorts the most recently updated project first regardless of API input order', () => {
+  const items = mergeProjectListItems([], [
+    { id: 'older', name: '旧项目', created_at: '2026-08-18T09:00:00Z', updated_at: '2026-08-18T09:10:00Z', stage: 'playable' },
+    { id: 'published', name: '刚发布', created_at: '2026-08-18T08:00:00Z', updated_at: '2026-08-18T11:55:00Z', stage: 'published' },
+  ])
+
+  assert.deepEqual(items.map((item) => item.id), ['published', 'older'])
+})

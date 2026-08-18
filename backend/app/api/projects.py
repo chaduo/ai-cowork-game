@@ -187,4 +187,8 @@ def get_project(project_id: str, request: Request) -> ProjectResponse:
 def list_projects(request: Request) -> list[ProjectResponse]:
     with _session(request) as session:
         projects = session.scalars(select(Project).order_by(Project.updated_at.desc())).all()
-        return [_response(session, project) for project in projects]
+        # ProjectResponse.updated_at includes activity from child lifecycle
+        # records (design, build, playable and release). Sort by that same
+        # derived value instead of the narrower Project column.
+        responses = [_response(session, project) for project in projects]
+        return sorted(responses, key=lambda project: project.updated_at, reverse=True)
