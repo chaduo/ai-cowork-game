@@ -29,7 +29,7 @@ export type DemoSeedName =
   | 'resources'
   | 'my-resources'
 
-export type AppSurface = 'projects' | 'workspace' | 'resources' | 'review'
+export type AppSurface = 'creator' | 'projects' | 'workspace' | 'resources' | 'review'
 
 const noErrors: DemoErrorFlags = {
   specError: false,

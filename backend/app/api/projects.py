@@ -53,6 +53,7 @@ class ProjectResponse(BaseModel):
     name: str
     original_idea: str
     stage: ProjectStage
+    created_at: datetime
     updated_at: datetime
     current_playable: PlayableSummary | None = None
     latest_release: ReleaseSummary | None = None
@@ -112,6 +113,7 @@ def _response(session: Session, project: Project) -> ProjectResponse:
         name=project.name,
         original_idea=project.original_idea,
         stage=ProjectLifecycleService(session).derive_project_stage(project.id),
+        created_at=project.created_at,
         updated_at=max(timestamps),
         current_playable=(PlayableSummary(
             id=current_playable.id,
@@ -185,4 +187,8 @@ def get_project(project_id: str, request: Request) -> ProjectResponse:
 def list_projects(request: Request) -> list[ProjectResponse]:
     with _session(request) as session:
         projects = session.scalars(select(Project).order_by(Project.updated_at.desc())).all()
-        return [_response(session, project) for project in projects]
+        # ProjectResponse.updated_at includes activity from child lifecycle
+        # records (design, build, playable and release). Sort by that same
+        # derived value instead of the narrower Project column.
+        responses = [_response(session, project) for project in projects]
+        return sorted(responses, key=lambda project: project.updated_at, reverse=True)

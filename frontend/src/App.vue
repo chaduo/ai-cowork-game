@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import K01CreateProject from './screens/K01CreateProject.vue'
+import ProjectsList from './screens/ProjectsList.vue'
 import K02ProjectWorkspace from './screens/K02ProjectWorkspace.vue'
 import MyResources from './screens/MyResources.vue'
 import ResourceReviewWorkspace from './screens/ResourceReviewWorkspace.vue'
@@ -27,7 +28,7 @@ const demoFlags = parseDemoFlags(window.location.search)
 if (!requestedScreen) configureDemoRuntime(demoFlags)
 const initialSurface = requestedScreen && demoNames.has(requestedScreen as Parameters<typeof seedDemo>[0])
   ? seedDemo(requestedScreen as Parameters<typeof seedDemo>[0], demoFlags)
-  : 'projects'
+  : 'creator'
 const surface = ref<AppSurface>(initialSurface)
 const reviewedRelease = ref<ReleaseRecord | null>(initialSurface === 'review' ? getActiveProject()?.releases.at(-1) ?? null : null)
 const activeProject = computed(() => getActiveProject())
@@ -116,8 +117,7 @@ function hydrateProjectSession(record: ProjectResponse) {
   return session
 }
 
-onMounted(async () => {
-  if (requestedScreen) return
+async function refreshProjects() {
   projectsLoading.value = true
   try {
     const records = await listProjectRecords()
@@ -133,7 +133,17 @@ onMounted(async () => {
   } finally {
     projectsLoading.value = false
   }
+}
+
+onMounted(async () => {
+  if (requestedScreen) return
+  await refreshProjects()
 })
+
+async function showProjects() {
+  surface.value = 'projects'
+  if (!requestedScreen) await refreshProjects()
+}
 
 function openResourceReview(release: ReleaseRecord) {
   reviewedRelease.value = release
@@ -166,7 +176,7 @@ async function openWorkspace(projectId: string) {
     const designResponse = await getProjectDesign(projectId)
     if (designResponse.status !== 'confirmed') {
       designResumeProjectId.value = projectId
-      surface.value = 'projects'
+      surface.value = 'creator'
       return
     }
   } catch (cause) {
@@ -190,8 +200,9 @@ async function openWorkspace(projectId: string) {
 </script>
 
 <template>
-  <MyResources v-if="surface === 'resources'" @projects="surface = 'projects'" @update-metadata="updateSavedMetadata" />
-  <ResourceReviewWorkspace v-else-if="surface === 'review' && reviewedRelease && activeProject" :project-id="activeProject.id" :project-name="activeProject.spec.title" :release="reviewedRelease" @back="closeResourceReview()" @resources="closeResourceReview('resources')" @projects="closeResourceReview('projects')" />
-  <K02ProjectWorkspace v-else-if="surface === 'workspace' && activeProject" :key="activeProject.id" :design="activeProject.design" :resource-pending-count="pendingResourceCount" @back="surface = 'projects'" @resources="surface = 'resources'" @review-resources="openResourceReview" />
-  <K01CreateProject v-else :projects="projectStore.projects" :remote-projects="projectRecords" :resume-project-id="designResumeProjectId" :projects-loading="projectsLoading" :project-list-error="projectListError" @open-project="openWorkspace" @enter-workspace="enterWorkspace" @resume-consumed="designResumeProjectId = null" @resources="surface = 'resources'" />
+  <ProjectsList v-if="surface === 'projects'" :projects="projectStore.projects" :remote-projects="projectRecords" :projects-loading="projectsLoading" :project-list-error="projectListError" @open-project="openWorkspace" @creator="surface = 'creator'" @resources="surface = 'resources'" />
+  <MyResources v-else-if="surface === 'resources'" @projects="showProjects" @update-metadata="updateSavedMetadata" />
+  <ResourceReviewWorkspace v-else-if="surface === 'review' && reviewedRelease && activeProject" :project-id="activeProject.id" :project-name="activeProject.spec.title" :release="reviewedRelease" @back="closeResourceReview()" @resources="closeResourceReview('resources')" @projects="showProjects" />
+  <K02ProjectWorkspace v-else-if="surface === 'workspace' && activeProject" :key="activeProject.id" :design="activeProject.design" :resource-pending-count="pendingResourceCount" @back="showProjects" @resources="surface = 'resources'" @review-resources="openResourceReview" />
+  <K01CreateProject v-else-if="surface === 'creator'" :remote-projects="projectRecords" :resume-project-id="designResumeProjectId" @enter-workspace="enterWorkspace" @resume-consumed="designResumeProjectId = null" @projects="showProjects" @resources="surface = 'resources'" />
 </template>

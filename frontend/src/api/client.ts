@@ -13,6 +13,7 @@ export interface ProjectResponse {
   name: string
   original_idea: string
   stage: string
+  created_at: string
   updated_at: string
   current_playable: {
     id: string
