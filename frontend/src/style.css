@@ -1467,12 +1467,34 @@ textarea:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(23, 111, 166,
 }
 
 @media (max-width: 900px) {
+  .k02-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 60px minmax(0, 1fr);
+    min-width: 0;
+    height: 100dvh;
+  }
+  .workspace-header { gap: 10px; padding: 0 14px; }
+  .workspace-project { flex: 1; min-width: 0; padding-left: 10px; }
+  .workspace-project h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .workspace-resources-link,
+  .lifecycle-rail,
+  .cowork-panel { display: none; }
+  .artifact-workspace { grid-column: 1; grid-row: 2; }
   .asset-grid,
   .asset-loading,
   .font-assets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 640px) {
+  .k02-workspace { grid-template-rows: 56px minmax(0, 1fr); }
+  .workspace-header { gap: 6px; padding: 0 10px; }
+  .workspace-brand { min-width: auto; }
+  .workspace-brand > span { width: 28px; height: 28px; }
+  .workspace-back { padding: 0 5px; }
+  .workspace-project { padding-left: 8px; }
+  .workspace-project h1 { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+  .artifact-tabs { padding: 0 4px; }
+  .artifact-tabs button { justify-content: center; flex: 1; min-width: 0; padding: 0 4px; }
   .asset-gallery-readonly { padding-right: 16px; padding-left: 16px; }
   .asset-gallery-readonly > header { align-items: flex-start; flex-direction: column; gap: 10px; }
   .asset-grid,
