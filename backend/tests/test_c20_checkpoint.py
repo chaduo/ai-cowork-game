@@ -19,6 +19,7 @@ verifies the on-disk commit (no silent drift).
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -32,10 +33,13 @@ from app.models import (
     GameDesignRevision,
     GameSpecRevision,
     HumanPlayReview,
+    PlayableVersion,
+    Project,
     Run,
     TestReport as CandidateTestReport,
 )
 from app.services.checkpoint import CheckpointService
+import app.services.checkpoint as checkpoint_module
 from app.services.lifecycle import ProjectLifecycleService
 from app.services.project_git import ProjectGitService
 from app.services.provenance import ProvenanceService
@@ -121,11 +125,25 @@ def test_confirm_gamespec_records_immutable_checkpoint(isolated_database, tmp_pa
 # --------------------------------------------------------------------------- #
 
 
-def _candidate_with_artifact(session: Session, project_id: str, workspace_root: Path, artifact: bytes) -> BuildCandidate:
+def _candidate_with_artifact(
+    session: Session,
+    project_id: str,
+    workspace_root: Path,
+    artifact: bytes,
+    *,
+    artifact_path: str = "index.html",
+    extra_files: dict[str, bytes] | None = None,
+) -> BuildCandidate:
     """Build a succeeded BuildCandidate whose artifact lives in a run workspace
     (mimics C13's prepared workspace + C10/C11's real artifact_path)."""
     workspace_root.mkdir(parents=True, exist_ok=True)
-    (workspace_root / "index.html").write_bytes(artifact)
+    entry = workspace_root / artifact_path
+    entry.parent.mkdir(parents=True, exist_ok=True)
+    entry.write_bytes(artifact)
+    for relative_path, content in (extra_files or {}).items():
+        output = workspace_root / relative_path
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(content)
     revision = session.scalar(
         select(GameSpecRevision).where(GameSpecRevision.project_id == project_id).order_by(GameSpecRevision.revision_number.desc())
     )
@@ -138,7 +156,16 @@ def _candidate_with_artifact(session: Session, project_id: str, workspace_root: 
     session.add(run)
     session.flush()
     candidate = BuildCandidate(project_id=project_id, build_id=build.id, status="succeeded",
-                                artifact_path="index.html", artifact_checksum=hashlib.sha256(artifact).hexdigest(), summary="c")
+                                artifact_path=artifact_path, artifact_checksum=hashlib.sha256(artifact).hexdigest(), summary="c")
+    candidate.artifact_manifest_json = json.dumps([
+        {
+            "path": path,
+            "kind": "preview_entry" if path == artifact_path else "asset",
+            "size_bytes": len(content),
+            "sha256": hashlib.sha256(content).hexdigest(),
+        }
+        for path, content in [(artifact_path, artifact), *((extra_files or {}).items())]
+    ])
     session.add(candidate)
     session.flush()
     # C14 Promote is intentionally stricter than the original C20 checkpoint
@@ -184,6 +211,231 @@ def test_promote_records_real_artifact_checkpoint(isolated_database, tmp_path: P
         # ProvenanceService verifies the on-disk commit (no drift).
         rec = ProvenanceService(session, git=git).resolve_playable(version.id)
         assert rec.commit_sha == version.git_commit and rec.verified
+
+
+def test_promote_checkpoints_complete_web_output_and_survives_workspace_deletion(
+    isolated_database,
+    tmp_path: Path,
+    git: ProjectGitService,
+) -> None:
+    import shutil
+
+    html = b"<html><img src='assets/hero.png'></html>"
+    png = b"\x89PNG\r\n\x1a\nimage"
+    svg = b"<svg xmlns='http://www.w3.org/2000/svg'></svg>"
+    ogg = b"OggS audio"
+    font = b"wOFF font"
+    with Session(isolated_database) as session:
+        project_id, _, _ = _confirmed_project(session)
+        workspace_root = tmp_path / "ws" / project_id
+        candidate = _candidate_with_artifact(
+            session,
+            project_id,
+            workspace_root,
+            html,
+            artifact_path="dist/index.html",
+            extra_files={
+                "dist/assets/hero.png": png,
+                "dist/assets/icon.svg": svg,
+                "dist/audio/theme.ogg": ogg,
+                "dist/fonts/game.woff": font,
+                "dist/main.js": b"console.log('game')",
+                "dist/styles.css": b"body { margin: 0; }",
+                "source/ignored.png": b"outside output root",
+            },
+        )
+
+        version = CheckpointService(session, git=git).promote(
+            candidate.id, test_report_id="report", verdict="pass",
+        )
+        session.commit()
+        version_id = version.id
+        commit = version.git_commit
+
+    shutil.rmtree(workspace_root)
+
+    with Session(isolated_database) as restarted:
+        version = restarted.get(PlayableVersion, version_id)
+        assert version is not None
+        assert git.read_file(project_id, commit, "playable/index.html") == html
+        assert git.read_file(project_id, commit, "playable/assets/hero.png") == png
+        assert git.read_file(project_id, commit, "playable/assets/icon.svg") == svg
+        assert git.read_file(project_id, commit, "playable/audio/theme.ogg") == ogg
+        assert git.read_file(project_id, commit, "playable/fonts/game.woff") == font
+        with pytest.raises(KeyError):
+            git.read_file(project_id, commit, "playable/source/ignored.png")
+
+
+def test_snapshot_policy_failure_does_not_advance_playable(
+    isolated_database,
+    tmp_path: Path,
+    git: ProjectGitService,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(checkpoint_module, "MAX_PLAYABLE_FILES", 1)
+    with Session(isolated_database) as session:
+        project_id, _, _ = _confirmed_project(session)
+        candidate = _candidate_with_artifact(
+            session,
+            project_id,
+            tmp_path / "ws" / project_id,
+            b"<html></html>",
+            extra_files={"hero.png": b"png"},
+        )
+
+        with pytest.raises(ValueError, match="too many files"):
+            CheckpointService(session, git=git).promote(
+                candidate.id, test_report_id="report", verdict="pass",
+            )
+
+        session.refresh(candidate)
+        project = session.get(Project, project_id)
+        assert candidate.status == "succeeded"
+        assert project is not None and project.current_playable_version_id is None
+
+
+def test_snapshot_rejects_symlink_without_advancing_playable(
+    isolated_database,
+    tmp_path: Path,
+    git: ProjectGitService,
+) -> None:
+    with Session(isolated_database) as session:
+        project_id, _, _ = _confirmed_project(session)
+        workspace = tmp_path / "ws" / project_id
+        candidate = _candidate_with_artifact(session, project_id, workspace, b"<html></html>")
+        target = workspace / "outside.png"
+        target.write_bytes(b"png")
+        (workspace / "linked.png").symlink_to(target)
+
+        with pytest.raises(ValueError, match="symlink"):
+            CheckpointService(session, git=git).promote(
+                candidate.id, test_report_id="report", verdict="pass",
+            )
+
+        project = session.get(Project, project_id)
+        assert candidate.status == "succeeded"
+        assert project is not None and project.current_playable_version_id is None
+
+
+def test_snapshot_rejects_artifact_path_outside_run_workspace(
+    isolated_database,
+    tmp_path: Path,
+    git: ProjectGitService,
+) -> None:
+    with Session(isolated_database) as session:
+        project_id, _, _ = _confirmed_project(session)
+        workspace = tmp_path / "ws" / project_id
+        candidate = _candidate_with_artifact(session, project_id, workspace, b"<html>inside</html>")
+        outside = workspace.parent / "outside"
+        outside.mkdir()
+        (outside / "index.html").write_bytes(b"<html>outside</html>")
+        (outside / "host.png").write_bytes(b"host file")
+        candidate.artifact_path = "../outside/index.html"
+        candidate.artifact_checksum = hashlib.sha256(b"<html>outside</html>").hexdigest()
+
+        with pytest.raises(ValueError, match="workspace"):
+            CheckpointService(session, git=git).promote(candidate.id, test_report_id="report", verdict="pass")
+
+        project = session.get(Project, project_id)
+        assert candidate.status == "succeeded"
+        assert project is not None and project.current_playable_version_id is None
+
+
+def test_snapshot_rejects_symlinked_entry_parent(
+    isolated_database,
+    tmp_path: Path,
+    git: ProjectGitService,
+) -> None:
+    with Session(isolated_database) as session:
+        project_id, _, _ = _confirmed_project(session)
+        workspace = tmp_path / "ws" / project_id
+        candidate = _candidate_with_artifact(
+            session,
+            project_id,
+            workspace,
+            b"<html>inside</html>",
+            artifact_path="dist/index.html",
+        )
+        outside = tmp_path / "outside-output"
+        outside.mkdir()
+        (outside / "index.html").write_bytes(b"<html>inside</html>")
+        (workspace / "dist" / "index.html").unlink()
+        (workspace / "dist").rmdir()
+        (workspace / "dist").symlink_to(outside, target_is_directory=True)
+
+        with pytest.raises(ValueError, match="symlink"):
+            CheckpointService(session, git=git).promote(candidate.id, test_report_id="report", verdict="pass")
+
+        project = session.get(Project, project_id)
+        assert candidate.status == "succeeded"
+        assert project is not None and project.current_playable_version_id is None
+
+
+def test_snapshot_rejects_entry_changed_after_candidate_creation(
+    isolated_database,
+    tmp_path: Path,
+    git: ProjectGitService,
+) -> None:
+    with Session(isolated_database) as session:
+        project_id, _, _ = _confirmed_project(session)
+        workspace = tmp_path / "ws" / project_id
+        candidate = _candidate_with_artifact(session, project_id, workspace, b"<html>verified</html>")
+        (workspace / "index.html").write_bytes(b"<html>changed</html>")
+
+        with pytest.raises(ValueError, match="checksum"):
+            CheckpointService(session, git=git).promote(candidate.id, test_report_id="report", verdict="pass")
+
+        project = session.get(Project, project_id)
+        assert candidate.status == "succeeded"
+        assert project is not None and project.current_playable_version_id is None
+
+
+def test_snapshot_rejects_sibling_asset_changed_after_candidate_creation(
+    isolated_database,
+    tmp_path: Path,
+    git: ProjectGitService,
+) -> None:
+    with Session(isolated_database) as session:
+        project_id, _, _ = _confirmed_project(session)
+        workspace = tmp_path / "ws" / project_id
+        candidate = _candidate_with_artifact(
+            session,
+            project_id,
+            workspace,
+            b"<html>verified</html>",
+            extra_files={"assets/hero.png": b"verified image"},
+        )
+        (workspace / "assets" / "hero.png").write_bytes(b"changed image")
+
+        with pytest.raises(ValueError, match="manifest"):
+            CheckpointService(session, git=git).promote(candidate.id, test_report_id="report", verdict="pass")
+
+        project = session.get(Project, project_id)
+        assert candidate.status == "succeeded"
+        assert project is not None and project.current_playable_version_id is None
+
+
+def test_snapshot_requires_verified_artifact_manifest(
+    isolated_database,
+    tmp_path: Path,
+    git: ProjectGitService,
+) -> None:
+    with Session(isolated_database) as session:
+        project_id, _, _ = _confirmed_project(session)
+        candidate = _candidate_with_artifact(
+            session,
+            project_id,
+            tmp_path / "ws" / project_id,
+            b"<html>legacy candidate</html>",
+        )
+        candidate.artifact_manifest_json = None
+
+        with pytest.raises(ValueError, match="rebuild required"):
+            CheckpointService(session, git=git).promote(candidate.id, test_report_id="report", verdict="pass")
+
+        project = session.get(Project, project_id)
+        assert candidate.status == "succeeded"
+        assert project is not None and project.current_playable_version_id is None
 
 
 def test_promote_without_hook_runner_still_checkpoints(isolated_database, tmp_path: Path, git: ProjectGitService) -> None:

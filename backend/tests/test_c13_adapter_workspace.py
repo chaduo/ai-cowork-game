@@ -15,7 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.agents.executor import ProcessResult
-from app.agents.opengame_adapter import _build_result
+from app.agents.opengame_adapter import _build_result, _write_debug_stream
 from app.agents.workspace import WorkspaceManager, redact_stream
 from app.contracts.game_agent import GameBuildRequest, WorkspaceRef
 from app.contracts.gamespec import CreatorGameSpec
@@ -96,3 +96,33 @@ def test_success_without_index_preview_is_invalid_artifact(tmp_path: Path) -> No
     assert result.status == "invalid_output"
     assert result.error is not None
     assert result.error.code == "invalid_artifact"
+
+
+def test_debug_stream_writes_redacted_provider_output(tmp_path: Path, monkeypatch) -> None:
+    debug_dir = tmp_path / "provider-debug"
+    monkeypatch.setenv("OPENGAME_DEBUG_DIR", str(debug_dir))
+
+    secret = "sk-proj-1234567890abcdefghijklmnop"
+    _write_debug_stream("run-1", f"tool output {secret}\n", "provider warning\n")
+
+    stdout = (debug_dir / "run-1.stdout.jsonl").read_text()
+    stderr = (debug_dir / "run-1.stderr.log").read_text()
+    assert secret not in stdout
+    assert "[REDACTED]" in stdout
+    assert stderr == "provider warning\n"
+
+
+def test_debug_stream_is_disabled_by_default(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("OPENGAME_DEBUG_DIR", raising=False)
+
+    _write_debug_stream("run-1", "stdout", "stderr")
+
+    assert not list(tmp_path.iterdir())
+
+
+def test_debug_stream_write_failure_does_not_escape(tmp_path: Path, monkeypatch) -> None:
+    blocked = tmp_path / "blocked"
+    blocked.write_text("file", encoding="utf-8")
+    monkeypatch.setenv("OPENGAME_DEBUG_DIR", str(blocked))
+
+    _write_debug_stream("run-1", "stdout", "stderr")

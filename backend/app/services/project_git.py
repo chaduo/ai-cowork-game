@@ -28,9 +28,19 @@ platform, deterministic. See pyproject.toml.
 from __future__ import annotations
 
 import os
+import zlib
 from dataclasses import dataclass
 from pathlib import Path
 
+from dulwich.errors import (
+    ChecksumMismatch,
+    FileFormatException,
+    NotGitRepository,
+    ObjectFormatException,
+    ObjectMissing,
+    RefFormatError,
+    WrongObjectException,
+)
 from dulwich.objects import Blob, Tree, Commit
 from dulwich.repo import Repo
 
@@ -56,10 +66,33 @@ class ContentPolicyError(ValueError):
     """
 
 
+class GitStorageError(RuntimeError):
+    """The trusted repository or one of its stored objects cannot be read."""
+
+
+_GIT_STORAGE_ERRORS = (
+    ChecksumMismatch,
+    FileFormatException,
+    NotGitRepository,
+    ObjectFormatException,
+    ObjectMissing,
+    RefFormatError,
+    WrongObjectException,
+    OSError,
+    zlib.error,
+)
+
+
 @dataclass(frozen=True)
 class ProjectRepo:
     project_id: str
     path: Path  # absolute: data/project-repos/{project_id}
+
+
+@dataclass(frozen=True)
+class GitFileEntry:
+    path: str
+    size_bytes: int
 
 
 class ProjectGitService:
@@ -135,7 +168,10 @@ class ProjectGitService:
         """Fetch ``rel_path`` as of commit ``sha`` (provenance recovery)."""
         self._validate_member(rel_path)
         repo_path = self._root / project_id
-        repo = Repo(str(repo_path))
+        try:
+            repo = Repo(str(repo_path))
+        except _GIT_STORAGE_ERRORS as cause:
+            raise GitStorageError("project repository is unavailable") from cause
         try:
             try:
                 obj = repo.get_object(sha.encode())
@@ -148,6 +184,57 @@ class ProjectGitService:
             if blob is None:
                 raise KeyError(f"file not in commit {sha}: {rel_path}")
             return blob.data
+        except _GIT_STORAGE_ERRORS as cause:
+            raise GitStorageError("project repository object is unreadable") from cause
+        finally:
+            repo.close()
+
+    def list_files(
+        self,
+        project_id: str,
+        sha: str,
+        prefix: str | None = None,
+    ) -> list[GitFileEntry]:
+        """List blobs in an immutable commit without checking out its tree."""
+
+        normalized_prefix: str | None = None
+        if prefix is not None:
+            self._validate_member(prefix)
+            normalized_prefix = prefix.replace("\\", "/").strip().strip("/")
+
+        repo_path = self._root / project_id
+        try:
+            repo = Repo(str(repo_path))
+        except _GIT_STORAGE_ERRORS as cause:
+            raise GitStorageError("project repository is unavailable") from cause
+        try:
+            try:
+                commit = repo.get_object(sha.encode())
+            except KeyError as exc:
+                raise ValueError(f"commit not found: {sha}") from exc
+            if not isinstance(commit, Commit):
+                raise ValueError(f"not a commit: {sha}")
+            root = repo.get_object(commit.tree)
+            if not isinstance(root, Tree):
+                raise ValueError(f"commit has no tree: {sha}")
+
+            entries: list[GitFileEntry] = []
+
+            def walk(tree: Tree, parent: str = "") -> None:
+                for entry in tree.iteritems(name_order=True):
+                    name = entry.path.decode("utf-8")
+                    path = f"{parent}/{name}" if parent else name
+                    obj = repo.get_object(entry.sha)
+                    if isinstance(obj, Tree):
+                        walk(obj, path)
+                    elif isinstance(obj, Blob):
+                        if normalized_prefix is None or path == normalized_prefix or path.startswith(f"{normalized_prefix}/"):
+                            entries.append(GitFileEntry(path=path, size_bytes=len(obj.data)))
+
+            walk(root)
+            return sorted(entries, key=lambda item: item.path)
+        except _GIT_STORAGE_ERRORS as cause:
+            raise GitStorageError("project repository object is unreadable") from cause
         finally:
             repo.close()
 
@@ -255,14 +342,18 @@ class ProjectGitService:
     def _lookup_path(self, repo: Repo, tree, rel_path: str):
         parts = rel_path.split("/")
         current = tree
-        for part in parts:
+        for index, part in enumerate(parts):
             mode, sha = current[part.encode("utf-8")]
             obj = repo.get_object(sha)
-            from dulwich.objects import Tree as _Tree
-            if isinstance(obj, _Tree):
+            is_last = index == len(parts) - 1
+            if isinstance(obj, Tree):
+                if is_last:
+                    return None
                 current = obj
                 continue
-            return obj
+            if isinstance(obj, Blob) and is_last:
+                return obj
+            return None
         return None
 
     @staticmethod

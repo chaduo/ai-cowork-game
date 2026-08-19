@@ -190,6 +190,14 @@ def test_success_creates_candidate_without_promoting_current_playable(isolated_d
         assert result.status == "succeeded"
         assert candidate is not None and candidate.status == "succeeded"
         assert candidate.artifact_path == "dist/index.html"
+        assert json.loads(candidate.artifact_manifest_json) == [
+            {
+                "path": "dist/index.html",
+                "kind": "preview_entry",
+                "size_bytes": 1200,
+                "sha256": "0" * 64,
+            }
+        ]
         assert session.get(Project, project.id).current_playable_version_id is None
         assert session.get(Run, job.run_id).status == "succeeded"
 

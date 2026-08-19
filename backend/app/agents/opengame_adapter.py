@@ -64,6 +64,26 @@ SUPPORTED_OPERATIONS = frozenset({"create"})
 _CREDENTIAL_ENV = ("OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL")
 
 
+def _write_debug_stream(run_id: str, stdout: str, stderr: str) -> None:
+    """Optionally persist redacted provider output for a single diagnostic run.
+
+    Debug capture is opt-in because provider streams can contain prompts and
+    generated source. Redact here as defense in depth so this helper is safe to
+    call from future diagnostics as well.
+    """
+    debug_dir = os.getenv("OPENGAME_DEBUG_DIR")
+    if not debug_dir:
+        return
+    root = Path(debug_dir)
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        (root / f"{run_id}.stdout.jsonl").write_text(redact_stream(stdout), encoding="utf-8")
+        (root / f"{run_id}.stderr.log").write_text(redact_stream(stderr), encoding="utf-8")
+    except OSError:
+        # Diagnostics must never change the provider result or strand a run.
+        return
+
+
 class OpenGameAdapter:
     """``GameAgent`` backed by the real OpenGame CLI (via a ProcessExecutor)."""
 
@@ -443,6 +463,11 @@ class _Run:
             process_status=pr.process_status,
             duration_seconds=pr.duration_seconds,
             output_truncated=pr.output_truncated,
+        )
+        _write_debug_stream(
+            self.handle.run_id,
+            self.process_result.stdout,
+            self.process_result.stderr,
         )
         self.run_events = map_stream_to_run_events(
             parse_stream_json(self.process_result.stdout),
