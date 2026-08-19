@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   buildCandidateRepairRequest,
   nextCandidateVerificationAction,
+  runCandidateVerificationFlow,
 } from '../src/contracts/candidateVerificationFlow.ts'
 
 const idle = {
@@ -103,4 +104,94 @@ test('truncates oversized repair context to the API request limit', () => {
   })
 
   assert.equal(request.length, 4000)
+})
+
+test('runs verify repair verify and stops at human review', async () => {
+  const calls = []
+  let state = {
+    candidateId: 'candidate-1',
+    testGateStatus: 'untested',
+    testReport: null,
+    repairRound: 0,
+    testRunning: false,
+    repairRunning: false,
+    testError: null,
+  }
+
+  await runCandidateVerificationFlow({
+    getState: () => state,
+    verify: async () => {
+      calls.push(`verify:${state.candidateId}`)
+      if (state.candidateId === 'candidate-1') {
+        state = {
+          ...state,
+          testGateStatus: 'failed',
+          testReport: { summary: 'movement failed', diagnostics: [], evidence: [] },
+        }
+      } else {
+        state = { ...state, testGateStatus: 'ready', testReport: { summary: 'passed', diagnostics: [], evidence: [] } }
+      }
+      return true
+    },
+    repair: async (request) => {
+      calls.push(`repair:${request.includes('movement failed')}`)
+      state = {
+        candidateId: 'candidate-2',
+        testGateStatus: 'untested',
+        testReport: null,
+        repairRound: 1,
+        testRunning: false,
+        repairRunning: false,
+        testError: null,
+      }
+      return true
+    },
+  })
+
+  assert.deepEqual(calls, ['verify:candidate-1', 'repair:true', 'verify:candidate-2'])
+  assert.equal(state.testGateStatus, 'ready')
+})
+
+test('does not repair a candidate at the automatic repair limit', async () => {
+  let repairCalls = 0
+  await runCandidateVerificationFlow({
+    getState: () => ({
+      candidateId: 'candidate-4',
+      testGateStatus: 'failed',
+      testReport: { summary: 'still failing', diagnostics: [], evidence: [] },
+      repairRound: 3,
+      testRunning: false,
+      repairRunning: false,
+      testError: null,
+    }),
+    verify: async () => true,
+    repair: async () => {
+      repairCalls += 1
+      return true
+    },
+  })
+
+  assert.equal(repairCalls, 0)
+})
+
+test('stops orchestration when verification transport fails', async () => {
+  let verifyCalls = 0
+  await runCandidateVerificationFlow({
+    getState: () => ({
+      candidateId: 'candidate-1',
+      testGateStatus: 'untested',
+      testReport: null,
+      repairRound: 0,
+      testRunning: false,
+      repairRunning: false,
+      testError: verifyCalls ? 'Chrome unavailable' : null,
+    }),
+    verify: async () => {
+      verifyCalls += 1
+      return false
+    },
+    repair: async () => true,
+  })
+
+  assert.equal(verifyCalls, 1)
 })

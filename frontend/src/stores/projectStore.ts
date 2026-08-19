@@ -7,6 +7,7 @@ import type { ChangePhase, ChangePlan, ChangeSource } from '../components/worksp
 import { createGameSpecFixture } from '../components/workspace/gameSpecFixture'
 import { createResourceCandidates as createResourceCandidatesFixture } from '../components/resources/resourceFixtures'
 import { matchResourcesToSpec } from './resourceMatching'
+import { runCandidateVerificationFlow } from '../contracts/candidateVerificationFlow'
 import { routeRemoteBuildState, type RemoteBuildRoute } from '../contracts/remoteBuildRouting'
 import type { ReleaseDraft, ReleasePhase, ReleaseRecord } from '../components/workspace/releaseTypes'
 import type { CreatorGameSpec } from '../contracts/creatorGameSpec'
@@ -28,6 +29,7 @@ import {
   recordHumanPlayReview,
   testBuildCandidate,
   type BuildResponse,
+  type CandidateResponse,
   type CandidateTestReportResponse,
   type HumanPlayReviewResponse,
   type PlayableVersionResponse,
@@ -88,6 +90,9 @@ export type RemoteBuildState = {
   candidatePreviewUrl?: string | null
   testRunning?: boolean
   testError?: string | null
+  attempt?: number
+  repairRound?: number
+  repairRunning?: boolean
   humanReview?: HumanPlayReviewResponse | null
   reviewRunning?: boolean
   reviewError?: string | null
@@ -525,6 +530,7 @@ export function setProjectGameSpecState(
 
 const REMOTE_BUILD_TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'cancelled', 'timed_out', 'invalid_output', 'unsupported'])
 const remoteBuildPollers = new Map<string, number>()
+const candidateVerificationJobs = new Set<string>()
 
 function clearRemoteBuildPoller(projectId: string): void {
   const timer = remoteBuildPollers.get(projectId)
@@ -566,6 +572,7 @@ function applyRemoteBuildState(session: ProjectSession, state: RemoteBuildState)
   })
   applyRemoteWorkspaceRoute(session, route)
   touchProject(session)
+  if (route === 'candidate') void ensureRemoteCandidateVerification(session.id)
 }
 
 function applyRemoteWorkspaceRoute(session: ProjectSession, route: RemoteBuildRoute): void {
@@ -629,18 +636,23 @@ function startRemoteBuildPolling(projectId: string): void {
   remoteBuildPollers.set(projectId, timer)
 }
 
-export async function startRemoteBuild(projectId: string): Promise<void> {
+export async function startRemoteBuild(
+  projectId: string,
+  requestText = '根据已确认的 GameSpec 创建第一个可试玩版本，并生成真实 index.html。',
+  repairRound?: number,
+): Promise<void> {
   const session = getProject(projectId)
   if (!session?.backendProjectId) return
   const existing = session.remoteBuild
+  const isRepairBuild = repairRound !== undefined
   const buildStillOwnsWork = existing && (
     !REMOTE_BUILD_TERMINAL_STATUSES.has(existing.status)
     || (existing.status === 'succeeded' && Boolean(existing.candidateId))
   )
-  if (buildStillOwnsWork) return
+  if (buildStillOwnsWork && !isRepairBuild) return
 
-  const buildId = existing?.buildId ?? crypto.randomUUID()
-  const runId = existing?.runId ?? `run-${buildId}`
+  const buildId = isRepairBuild ? crypto.randomUUID() : existing?.buildId ?? crypto.randomUUID()
+  const runId = isRepairBuild ? `run-${buildId}` : existing?.runId ?? `run-${buildId}`
   session.remoteBuild = {
     buildId,
     runId,
@@ -649,6 +661,11 @@ export async function startRemoteBuild(projectId: string): Promise<void> {
     artifactPath: null,
     errorCode: null,
     errorMessage: null,
+    testGateStatus: isRepairBuild ? existing?.testGateStatus : undefined,
+    testReport: isRepairBuild ? existing?.testReport : null,
+    attempt: isRepairBuild ? existing?.attempt : undefined,
+    repairRound,
+    repairRunning: repairRound !== undefined,
     playableVersion: existing?.playableVersion ?? null,
     previewUrl: existing?.previewUrl ?? null,
   }
@@ -660,7 +677,7 @@ export async function startRemoteBuild(projectId: string): Promise<void> {
     const response = await createProjectBuild(session.backendProjectId, {
       buildId,
       runId,
-      requestText: '根据已确认的 GameSpec 创建第一个可试玩版本，并生成真实 index.html。',
+      requestText,
     })
     applyRemoteBuildResponse(projectId, response)
   } catch (cause) {
@@ -674,6 +691,8 @@ export async function startRemoteBuild(projectId: string): Promise<void> {
       artifactPath: null,
       errorCode: cause instanceof ApiClientError ? cause.code : 'build_request_failed',
       errorMessage: cause instanceof ApiClientError ? cause.message : '真实 Build 请求失败。',
+      repairRound,
+      repairRunning: false,
     }
     current.phase = 'build_error'
     clearRemoteBuildPoller(projectId)
@@ -698,10 +717,10 @@ export async function cancelRemoteBuild(projectId: string): Promise<void> {
   }
 }
 
-export async function testRemoteCandidate(projectId: string): Promise<void> {
+export async function testRemoteCandidate(projectId: string): Promise<CandidateResponse | null> {
   const session = getProject(projectId)
   const candidateId = session?.remoteBuild?.candidateId
-  if (!session?.remoteBuild || !candidateId || session.remoteBuild.testRunning) return
+  if (!session?.remoteBuild || !candidateId || session.remoteBuild.testRunning) return null
   session.remoteBuild.testRunning = true
   session.remoteBuild.testError = null
   touchProject(session)
@@ -709,11 +728,15 @@ export async function testRemoteCandidate(projectId: string): Promise<void> {
     const response = await testBuildCandidate(candidateId)
     session.remoteBuild.testGateStatus = response.test_gate_status
     session.remoteBuild.testReport = response.report
+    session.remoteBuild.attempt = response.attempt
+    session.remoteBuild.repairRound = response.repair_round
     session.remoteBuild.candidatePreviewUrl = response.test_gate_status === 'ready'
       ? candidatePreviewUrl(projectId, candidateId)
       : null
+    return response
   } catch (cause) {
     session.remoteBuild.testError = cause instanceof ApiClientError ? cause.message : '平台验证暂时无法完成。'
+    return null
   } finally {
     session.remoteBuild.testRunning = false
     touchProject(session)
@@ -728,6 +751,8 @@ export async function refreshRemoteCandidateTest(projectId: string): Promise<voi
     const response = await getBuildCandidateTestReport(candidateId)
     session.remoteBuild.testGateStatus = response.test_gate_status
     session.remoteBuild.testReport = response.report
+    session.remoteBuild.attempt = response.attempt
+    session.remoteBuild.repairRound = response.repair_round
     session.remoteBuild.candidatePreviewUrl = response.test_gate_status === 'ready'
       ? candidatePreviewUrl(projectId, candidateId)
       : null
@@ -736,6 +761,34 @@ export async function refreshRemoteCandidateTest(projectId: string): Promise<voi
     session.remoteBuild.testError = cause instanceof ApiClientError ? cause.message : '暂时无法读取平台验证证据。'
   }
   touchProject(session)
+  if (session.remoteBuild.testReport) void ensureRemoteCandidateVerification(projectId)
+}
+
+export async function ensureRemoteCandidateVerification(projectId: string): Promise<void> {
+  const session = getProject(projectId)
+  if (!session?.backendProjectId || !session.remoteBuild?.candidateId || candidateVerificationJobs.has(projectId)) return
+  candidateVerificationJobs.add(projectId)
+  try {
+    await runCandidateVerificationFlow({
+      getState: () => {
+        const current = getProject(projectId)?.remoteBuild
+        if (!current?.candidateId) return null
+        return {
+          candidateId: current.candidateId,
+          testGateStatus: current.testGateStatus,
+          testReport: current.testReport ?? null,
+          repairRound: current.repairRound ?? 0,
+          testRunning: Boolean(current.testRunning),
+          repairRunning: Boolean(current.repairRunning),
+          testError: current.testError ?? null,
+        }
+      },
+      verify: async () => Boolean(await testRemoteCandidate(projectId)),
+      repair: async (request) => Boolean(await rebuildRemoteCandidate(projectId, request)),
+    })
+  } finally {
+    candidateVerificationJobs.delete(projectId)
+  }
 }
 
 export async function refreshRemoteHumanReview(projectId: string): Promise<void> {
@@ -832,20 +885,44 @@ export async function refreshRemotePlayable(projectId: string): Promise<void> {
   touchProject(session)
 }
 
-export async function rebuildRemoteCandidate(projectId: string): Promise<void> {
+export async function rebuildRemoteCandidate(
+  projectId: string,
+  requestText = '根据平台验证证据修复当前 Candidate，并生成完整的 index.html。',
+): Promise<CandidateResponse | null> {
   const session = getProject(projectId)
-  const parentCandidateId = session?.remoteBuild?.candidateId
-  if (!session?.backendProjectId || !parentCandidateId) return
-  session.remoteBuild = null
-  await startRemoteBuild(projectId)
-  const updated = getProject(projectId)
-  const replacementCandidateId = updated?.remoteBuild?.candidateId
-  if (!updated?.remoteBuild || updated.remoteBuild.status !== 'succeeded' || !replacementCandidateId) return
+  const parent = session?.remoteBuild
+  const parentCandidateId = parent?.candidateId
+  if (!session?.backendProjectId || !parent || !parentCandidateId || parent.repairRunning) return null
+  const nextRepairRound = (parent.repairRound ?? 0) + 1
+  parent.repairRunning = true
+  parent.testError = null
+  touchProject(session)
   try {
-    await linkBuildCandidateRepair(parentCandidateId, replacementCandidateId)
-  } catch (cause) {
-    updated.remoteBuild.testError = cause instanceof ApiClientError ? cause.message : '新 Candidate 已生成，但暂时无法记录修复来源。'
+    await startRemoteBuild(projectId, requestText, nextRepairRound)
+    const updated = getProject(projectId)
+    const replacementCandidateId = updated?.remoteBuild?.candidateId
+    if (!updated?.remoteBuild || updated.remoteBuild.status !== 'succeeded' || !replacementCandidateId) return null
+    const response = await linkBuildCandidateRepair(parentCandidateId, replacementCandidateId)
+    updated.remoteBuild.testGateStatus = response.test_gate_status
+    updated.remoteBuild.testReport = response.report
+    updated.remoteBuild.attempt = response.attempt
+    updated.remoteBuild.repairRound = response.repair_round
+    updated.remoteBuild.testError = null
     touchProject(updated)
+    return response
+  } catch (cause) {
+    const updated = getProject(projectId)
+    if (updated?.remoteBuild) {
+      updated.remoteBuild.testError = cause instanceof ApiClientError ? cause.message : '新 Candidate 已生成，但暂时无法记录修复来源。'
+      touchProject(updated)
+    }
+    return null
+  } finally {
+    const updated = getProject(projectId)
+    if (updated?.remoteBuild) {
+      updated.remoteBuild.repairRunning = false
+      touchProject(updated)
+    }
   }
 }
 

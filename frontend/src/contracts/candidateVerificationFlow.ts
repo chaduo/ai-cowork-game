@@ -25,6 +25,22 @@ export type CandidateFailureReport = {
   evidence: Array<{ kind: string; status: string; observed: string }>
 }
 
+export type CandidateVerificationRuntimeState = {
+  candidateId: string
+  testGateStatus?: string
+  testReport: Omit<CandidateFailureReport, 'repairRound'> | null
+  repairRound: number
+  testRunning: boolean
+  repairRunning: boolean
+  testError: string | null
+}
+
+export type CandidateVerificationFlow = {
+  getState: () => CandidateVerificationRuntimeState | null
+  verify: () => Promise<boolean>
+  repair: (request: string) => Promise<boolean>
+}
+
 export function nextCandidateVerificationAction(input: CandidateVerificationState): CandidateVerificationAction {
   if (input.testRunning || input.repairRunning) return 'wait'
   if (input.testGateStatus === 'ready') return 'human_review'
@@ -64,4 +80,32 @@ export function buildCandidateRepairRequest(report: CandidateFailureReport): str
     'Keep the confirmed GameSpec and unaffected behavior unchanged. Produce a complete index.html Candidate.',
   ]
   return lines.join('\n').slice(0, MAX_REPAIR_REQUEST_LENGTH)
+}
+
+export async function runCandidateVerificationFlow(flow: CandidateVerificationFlow): Promise<void> {
+  while (true) {
+    const state = flow.getState()
+    if (!state) return
+    const action = nextCandidateVerificationAction({
+      testGateStatus: state.testGateStatus,
+      hasReport: Boolean(state.testReport),
+      repairRound: state.repairRound,
+      testRunning: state.testRunning,
+      repairRunning: state.repairRunning,
+      hasTransportError: Boolean(state.testError),
+    })
+    if (action === 'verify') {
+      if (!await flow.verify()) return
+      continue
+    }
+    if (action === 'repair' && state.testReport) {
+      const request = buildCandidateRepairRequest({
+        repairRound: state.repairRound,
+        ...state.testReport,
+      })
+      if (!await flow.repair(request)) return
+      continue
+    }
+    return
+  }
 }
