@@ -175,6 +175,21 @@ export interface PlayableVersionResponse {
   is_current: boolean
 }
 
+export interface PlayableAssetResponse {
+  path: string
+  name: string
+  kind: 'image' | 'audio' | 'font'
+  mime_type: string
+  size_bytes: number
+  content_url: string
+}
+
+export interface PlayableAssetInventoryResponse {
+  version_id: string
+  git_commit: string
+  assets: PlayableAssetResponse[]
+}
+
 export interface PublishReviewResponse {
   project_id: string
   eligible: boolean
@@ -339,6 +354,12 @@ export function promoteBuildCandidate(candidateId: string, gitCommit: string): P
 
 export function listPlayableVersions(projectId: string): Promise<PlayableVersionResponse[]> {
   return request<PlayableVersionResponse[]>(`/v1/projects/${encodeURIComponent(projectId)}/playable-versions`)
+}
+
+export function listPlayableAssets(projectId: string, versionId: string): Promise<PlayableAssetInventoryResponse> {
+  return request<PlayableAssetInventoryResponse>(
+    `/v1/projects/${encodeURIComponent(projectId)}/playable-versions/${encodeURIComponent(versionId)}/assets`,
+  )
 }
 
 export function playablePreviewUrl(projectId: string, versionId: string): string {
