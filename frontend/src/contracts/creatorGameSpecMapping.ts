@@ -2,6 +2,12 @@ import type { GameSpecModel } from '../components/workspace/workspaceTypes'
 import type { CreatorGameSpec, RuntimeBuildSpec } from './creatorGameSpec'
 
 const copyList = (items: string[]): string[] => [...items]
+const defaultCoreLoop = ['执行主要行动', '观察结果并调整下一步', '推进主要目标', '触发完成或失败结算']
+
+function nonEmptyCoreLoop(items: string[]): string[] {
+  const steps = items.filter((item) => item.trim().length > 0)
+  return steps.length > 0 ? steps : copyList(defaultCoreLoop)
+}
 
 export function creatorGameSpecFromViewModel(model: GameSpecModel): CreatorGameSpec {
   return {
@@ -12,7 +18,7 @@ export function creatorGameSpecFromViewModel(model: GameSpecModel): CreatorGameS
       hypothesis: model.buildTarget.hypothesis,
     },
     gameplay: {
-      core_loop: copyList(model.gameplay.coreLoop),
+      core_loop: nonEmptyCoreLoop(model.gameplay.coreLoop),
       actions: copyList(model.gameplay.actions),
     },
     characters: {

@@ -77,6 +77,17 @@ export function createGameSpecFixture(design: ConfirmedGameDesign): GameSpecMode
   }
 
   if (design.scenarioId !== 'farm') {
+    const confirmedAction = design.decisions.find((decision) => /player[_-]?action|action|操作|行动/i.test(decision.questionId))?.answer
+    const confirmedGoal = design.decisions.find((decision) => /goal|completion|完成|目标/i.test(decision.questionId))?.answer
+    const providerCoreLoop = design.summary.coreLoop.filter((step) => step.trim().length > 0)
+    const coreLoop = providerCoreLoop.length > 0
+      ? providerCoreLoop
+      : [
+          confirmedAction || '执行主要行动',
+          '观察结果并调整下一步',
+          confirmedGoal || '推进主要目标',
+          '触发完成或失败结算',
+        ]
     return {
       title: design.projectTitle,
       draftLabel: 'Draft · v1',
@@ -84,7 +95,7 @@ export function createGameSpecFixture(design: ConfirmedGameDesign): GameSpecMode
         goal: `做出一个能够验证“${design.summary.highlights[0] ?? '核心体验'}”的完整 2D 可玩闭环。`,
         hypothesis: '验证玩家是否能理解主要目标，并通过重复行动获得清楚的反馈。',
       },
-      gameplay: { coreLoop: design.summary.coreLoop, actions: ['移动', '探索', '收集', '互动', '完成目标'] },
+      gameplay: { coreLoop, actions: ['移动', '探索', '收集', '互动', '完成目标'] },
       characters: {
         player: '游戏主角', playerActions: ['移动', '探索', '互动'], npcName: '向导 NPC', npcRole: '提供目标与反馈',
         npcBehaviors: ['固定区域活动', '与玩家对话', '发布目标', '根据进度改变对话'], dialogueStates: ['初识', '熟悉'],
