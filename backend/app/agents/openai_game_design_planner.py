@@ -27,12 +27,24 @@ def _content_text(content: Any) -> str:
         for item in content:
             if isinstance(item, str):
                 parts.append(item)
-            elif isinstance(item, dict) and isinstance(item.get("text"), str):
-                parts.append(item["text"])
+            elif isinstance(item, dict):
+                # Compatible providers may nest output under either key.
+                try:
+                    parts.append(_content_text(item.get("text", item.get("content"))))
+                except ValueError:
+                    continue
         if parts:
             return "".join(parts)
-    if isinstance(content, dict) and isinstance(content.get("text"), str):
-        return content["text"]
+    if isinstance(content, dict):
+        for key in ("text", "content"):
+            value = content.get(key)
+            if isinstance(value, str):
+                return value
+            if isinstance(value, (dict, list)):
+                try:
+                    return _content_text(value)
+                except ValueError:
+                    continue
     raise ValueError("provider content is not text")
 
 

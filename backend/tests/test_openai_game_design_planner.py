@@ -239,6 +239,45 @@ def test_provider_repairs_one_invalid_turn_response() -> None:
     assert turn.next_question.id == "q2"
 
 
+def test_provider_accepts_nested_output_content_segments() -> None:
+    responses = [
+        _Response(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "content": '{"next_question":{"id":"q2","prompt":"玩家下一步做什么？","choices":[]}}',
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        ),
+    ]
+    calls: list[dict] = []
+
+    def opener(request, timeout):
+        calls.append(json.loads(request.data.decode()))
+        return responses.pop(0)
+
+    planner = OpenAICompatibleGameDesignPlanner(
+        base_url="https://example.test/v1",
+        api_key="secret",
+        model="test-model",
+        opener=opener,
+    )
+
+    turn = planner.plan_turn("project", _draft(), BrainstormInput(action="continue"))
+
+    assert len(calls) == 1
+    assert turn.next_question is not None
+    assert turn.next_question.id == "q2"
+
+
 def test_provider_requires_credentials() -> None:
     planner = OpenAICompatibleGameDesignPlanner(base_url=None, api_key=None, model="test")
 

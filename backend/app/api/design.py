@@ -177,6 +177,11 @@ def brainstorm_design(project_id: str, payload: BrainstormInput, request: Reques
         design = session.scalar(select(GameDesign).where(GameDesign.project_id == project.id))
         current = _response(session, project, design).draft
         base = apply_brainstorm_input(current, payload, turn=current.clarification.question_index + (1 if payload.action in {"answer", "free_text"} else 0))
+        # Keep reducer-owned user decisions durable even when the provider
+        # response is unavailable or invalid, so continue can retry safely.
+        if payload.action in {"answer", "free_text"}:
+            ProjectLifecycleService(session).submit_design(project.id, base.model_dump(mode="json", exclude_none=True))
+            session.commit()
         try:
             planned = planner.plan_turn(project.id, base, payload)
         except GameDesignProviderNotConfigured as cause:

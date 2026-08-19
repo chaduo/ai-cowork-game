@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.main import create_app
 from app.agents.openai_game_design_planner import OpenAICompatibleGameDesignPlanner
+from app.agents.game_design_planner import GameDesignProviderError
 
 
 def _client(database_url: str, *, planner=None) -> TestClient:
@@ -167,3 +168,34 @@ def test_real_brainstorm_route_recovers_one_invalid_follow_up_response(isolated_
 
     assert second.status_code == 200
     assert second.json()["next_question"]["id"] == "q2"
+
+
+def test_brainstorm_failure_commits_user_decision_for_continue_retry(isolated_database) -> None:
+    class Planner:
+        def __init__(self):
+            self.calls = 0
+
+        def plan_turn(self, project_id, draft, user_input):
+            self.calls += 1
+            if self.calls == 2:
+                raise GameDesignProviderError("invalid brainstorm JSON (invalid_response_shape)")
+            from app.agents.fake_game_design_planner import FakeGameDesignPlanner
+            return FakeGameDesignPlanner().plan_turn(project_id, draft, user_input)
+
+    planner = Planner()
+    client = _client(str(isolated_database.url), planner=planner)
+    project = _project(client, key="persist-before-retry", idea="探索一座旧灯塔")
+    started = client.post(f"/api/v1/projects/{project['id']}/design/brainstorm", json={"action": "start"}).json()
+    question = started["next_question"]
+
+    failed = client.post(
+        f"/api/v1/projects/{project['id']}/design/brainstorm",
+        json={"action": "answer", "question_id": question["id"], "answer": "探索和发现"},
+    )
+    assert failed.status_code == 502
+    saved = client.get(f"/api/v1/projects/{project['id']}/design").json()["draft"]
+    assert saved["decisions"][0]["answer"] == "探索和发现"
+
+    retried = client.post(f"/api/v1/projects/{project['id']}/design/brainstorm", json={"action": "continue"})
+    assert retried.status_code == 200
+    assert retried.json()["draft"]["decisions"][0]["answer"] == "探索和发现"
