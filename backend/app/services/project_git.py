@@ -62,6 +62,12 @@ class ProjectRepo:
     path: Path  # absolute: data/project-repos/{project_id}
 
 
+@dataclass(frozen=True)
+class GitFileEntry:
+    path: str
+    size_bytes: int
+
+
 class ProjectGitService:
     """Owns the trusted per-project Git repository and checkpoint primitives.
 
@@ -148,6 +154,50 @@ class ProjectGitService:
             if blob is None:
                 raise KeyError(f"file not in commit {sha}: {rel_path}")
             return blob.data
+        finally:
+            repo.close()
+
+    def list_files(
+        self,
+        project_id: str,
+        sha: str,
+        prefix: str | None = None,
+    ) -> list[GitFileEntry]:
+        """List blobs in an immutable commit without checking out its tree."""
+
+        normalized_prefix: str | None = None
+        if prefix is not None:
+            self._validate_member(prefix)
+            normalized_prefix = prefix.replace("\\", "/").strip().strip("/")
+
+        repo_path = self._root / project_id
+        repo = Repo(str(repo_path))
+        try:
+            try:
+                commit = repo.get_object(sha.encode())
+            except KeyError as exc:
+                raise ValueError(f"commit not found: {sha}") from exc
+            if not isinstance(commit, Commit):
+                raise ValueError(f"not a commit: {sha}")
+            root = repo.get_object(commit.tree)
+            if not isinstance(root, Tree):
+                raise ValueError(f"commit has no tree: {sha}")
+
+            entries: list[GitFileEntry] = []
+
+            def walk(tree: Tree, parent: str = "") -> None:
+                for entry in tree.iteritems(name_order=True):
+                    name = entry.path.decode("utf-8")
+                    path = f"{parent}/{name}" if parent else name
+                    obj = repo.get_object(entry.sha)
+                    if isinstance(obj, Tree):
+                        walk(obj, path)
+                    elif isinstance(obj, Blob):
+                        if normalized_prefix is None or path == normalized_prefix or path.startswith(f"{normalized_prefix}/"):
+                            entries.append(GitFileEntry(path=path, size_bytes=len(obj.data)))
+
+            walk(root)
+            return sorted(entries, key=lambda item: item.path)
         finally:
             repo.close()
 

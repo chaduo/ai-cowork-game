@@ -123,6 +123,34 @@ def test_read_file_nonexistent_commit_raises(service: ProjectGitService) -> None
         service.read_file("p", "0" * 40, "playable/index.html")
 
 
+def test_list_files_returns_sorted_nested_blob_metadata(service: ProjectGitService) -> None:
+    service.init_project("p")
+    sha = service.commit("p", message="assets", files={
+        "playable/index.html": b"html",
+        "playable/assets/hero.png": b"png",
+        "playable/audio/theme.ogg": b"audio",
+        "gamespec/revision.json": b"{}",
+    })
+
+    entries = service.list_files("p", sha, prefix="playable/")
+
+    assert [(entry.path, entry.size_bytes) for entry in entries] == [
+        ("playable/assets/hero.png", 3),
+        ("playable/audio/theme.ogg", 5),
+        ("playable/index.html", 4),
+    ]
+
+
+def test_list_files_rejects_invalid_prefix_and_unknown_commit(service: ProjectGitService) -> None:
+    service.init_project("p")
+    sha = service.commit("p", message="assets", files={"playable/index.html": b"html"})
+
+    with pytest.raises(ContentPolicyError):
+        service.list_files("p", sha, prefix="../playable")
+    with pytest.raises(ValueError, match="commit not found"):
+        service.list_files("p", "0" * 40)
+
+
 # --------------------------------------------------------------------------- #
 # tags (human-readable checkpoints)
 # --------------------------------------------------------------------------- #
