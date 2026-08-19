@@ -1,9 +1,11 @@
 from datetime import datetime
+from hashlib import sha256
 from pathlib import Path
 from typing import Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, Request, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -12,6 +14,8 @@ from app.errors import ApiError
 from app.agents.workspace import WorkspaceEscapeError, WorkspaceManager
 from app.models import Build, BuildCandidate, HumanPlayReview, PlayableVersion, Project, Run
 from app.services.lifecycle import ProjectLifecycleService
+from app.services.checkpoint import CheckpointService
+from app.services.playable_assets import PlayableAssetService
 
 
 router = APIRouter(prefix="/api/v1", tags=["playable-versions"])
@@ -63,8 +67,75 @@ class RestoreCandidateResponse(BaseModel):
     artifact_checksum: str | None
 
 
+class PlayableAssetResponse(BaseModel):
+    path: str
+    name: str
+    kind: Literal["image", "audio", "font"]
+    mime_type: str
+    size_bytes: int
+    content_url: str
+
+
+class PlayableAssetInventoryResponse(BaseModel):
+    version_id: str
+    git_commit: str
+    assets: list[PlayableAssetResponse]
+
+
 def _session(request: Request) -> Session:
     return Session(request.app.state.engine)
+
+
+def _playable_version(session: Session, project_id: str, version_id: str) -> PlayableVersion:
+    version = session.get(PlayableVersion, version_id)
+    if version is None or version.project_id != project_id:
+        raise ApiError("playable_version_not_found", "Playable Version not found", [], 404)
+    return version
+
+
+@router.get(
+    "/projects/{project_id}/playable-versions/{version_id}/assets",
+    response_model=PlayableAssetInventoryResponse,
+)
+def list_playable_assets(project_id: str, version_id: str, request: Request) -> PlayableAssetInventoryResponse:
+    with _session(request) as session:
+        version = _playable_version(session, project_id, version_id)
+        service = PlayableAssetService(request.app.state.project_git)
+        try:
+            assets = service.list_assets(version)
+        except (OSError, ValueError) as cause:
+            raise ApiError("playable_assets_unavailable", "Playable assets are not available", [], 409) from cause
+        base = f"/api/v1/projects/{quote(project_id, safe='')}/playable-versions/{quote(version_id, safe='')}/assets/content"
+        return PlayableAssetInventoryResponse(
+            version_id=version.id,
+            git_commit=version.git_commit,
+            assets=[PlayableAssetResponse(
+                path=asset.path,
+                name=asset.name,
+                kind=asset.kind,
+                mime_type=asset.mime_type,
+                size_bytes=asset.size_bytes,
+                content_url=f"{base}?path={quote(asset.path, safe='')}",
+            ) for asset in assets],
+        )
+
+
+@router.get("/projects/{project_id}/playable-versions/{version_id}/assets/content")
+def get_playable_asset_content(project_id: str, version_id: str, path: str, request: Request) -> Response:
+    with _session(request) as session:
+        version = _playable_version(session, project_id, version_id)
+        try:
+            asset, content = PlayableAssetService(request.app.state.project_git).read_asset(version, path)
+        except (OSError, ValueError) as cause:
+            raise ApiError("playable_asset_not_found", "Playable asset not found", [], 404) from cause
+        headers = {
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "ETag": f'"{version.git_commit}:{sha256(path.encode()).hexdigest()}"',
+            "X-Content-Type-Options": "nosniff",
+        }
+        if asset.mime_type == "image/svg+xml":
+            headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+        return Response(content=content, media_type=asset.mime_type, headers=headers)
 
 
 def _serve_candidate_artifact(
@@ -123,9 +194,7 @@ def preview_candidate(project_id: str, candidate_id: str, request: Request) -> F
 @router.get("/projects/{project_id}/playable-versions/{version_id}/preview")
 def preview_playable_version(project_id: str, version_id: str, request: Request) -> FileResponse:
     with _session(request) as session:
-        version = session.get(PlayableVersion, version_id)
-        if version is None or version.project_id != project_id:
-            raise ApiError("playable_version_not_found", "Playable Version not found", [], 404)
+        version = _playable_version(session, project_id, version_id)
 
         candidate = session.get(BuildCandidate, version.candidate_id)
         build = session.get(Build, candidate.build_id) if candidate else None
@@ -238,9 +307,13 @@ def promote_candidate(
     with _session(request) as session:
         _candidate(session, candidate_id)
         try:
-            version = ProjectLifecycleService(session).promote_candidate(
+            version = CheckpointService(
+                session,
+                git=request.app.state.project_git,
+            ).promote(
                 candidate_id,
-                git_commit=payload.git_commit,
+                test_report_id="persisted",
+                verdict="persisted",
             )
             session.commit()
             return PlayableVersionResponse(
