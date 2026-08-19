@@ -108,6 +108,13 @@ def test_candidate_preview_requires_ready_test_gate(isolated_database, tmp_path:
 
 def test_preview_returns_promoted_html_artifact(isolated_database, tmp_path: Path) -> None:
     app, project_id, version_id = _promoted_app(isolated_database, tmp_path)
+    with Session(app.state.engine) as session:
+        version = session.get(PlayableVersion, version_id)
+        assert version is not None
+        # Promote checkpoints use the immutable Git path, while the source Run
+        # workspace keeps the provider-relative candidate path.
+        version.artifact_path = "playable/index.html"
+        session.commit()
 
     response = TestClient(app).get(
         f"/api/v1/projects/{project_id}/playable-versions/{version_id}/preview"

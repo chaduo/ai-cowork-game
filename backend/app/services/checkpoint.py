@@ -23,11 +23,15 @@ The content is committed under the C20 ``ALLOWED_TOP_DIRS`` layout: ``gdd/``,
 
 from __future__ import annotations
 
+import hmac
+import json
 from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.agents.workspace import WorkspaceEscapeError, WorkspaceManager
+from app.contracts.game_agent import ArtifactManifestEntry
 from app.models import (
     Build,
     BuildCandidate,
@@ -36,12 +40,25 @@ from app.models import (
     PlayableVersion,
     Release,
     Run,
+    utc_now,
 )
 from app.services.lifecycle import ProjectLifecycleService
-from app.services.project_git import ProjectGitService
+from app.services.project_git import GitStorageError, ProjectGitService
 from app.services.provenance import ProvenanceService
 
 _PLACEHOLDER_COMMIT = "pending-checkpoint"
+
+PLAYABLE_OUTPUT_EXTENSIONS = frozenset({
+    ".html", ".css", ".js", ".mjs", ".json", ".wasm",
+    ".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg",
+    ".mp3", ".ogg", ".wav", ".m4a", ".aac", ".flac",
+    ".woff", ".woff2", ".ttf", ".otf",
+})
+MAX_PLAYABLE_FILES = 500
+MAX_PLAYABLE_FILE_BYTES = 20 * 1024 * 1024
+MAX_PLAYABLE_TOTAL_BYTES = 100 * 1024 * 1024
+_PROTECTED_OUTPUT_NAMES = frozenset({".git", ".env", ".env.local", "credentials.json", "secrets.json"})
+_PROTECTED_OUTPUT_SUFFIXES = (".key", ".pem")
 
 
 class CheckpointService:
@@ -53,9 +70,16 @@ class CheckpointService:
     (zhao's gates are called unchanged).
     """
 
-    def __init__(self, session: Session, *, git: ProjectGitService | None = None) -> None:
+    def __init__(
+        self,
+        session: Session,
+        *,
+        git: ProjectGitService | None = None,
+        workspace_manager: WorkspaceManager | None = None,
+    ) -> None:
         self.session = session
         self._git = git or ProjectGitService()
+        self._workspace = workspace_manager or WorkspaceManager()
         self._lifecycle = ProjectLifecycleService(session)
         self._provenance = ProvenanceService(session, git=self._git)
 
@@ -132,37 +156,127 @@ class CheckpointService:
         candidate = self.session.get(BuildCandidate, candidate_id)
         if candidate is None:
             raise ValueError("candidate not found")
+        if candidate.status == "promoted":
+            return self._lifecycle.promote_candidate(candidate.id, git_commit=_PLACEHOLDER_COMMIT)
         if candidate.status != "succeeded":
             raise ValueError("only a succeeded candidate can be promoted")
 
-        # The lifecycle gate owns the business transition. It requires a git_commit
-        # string; pass a placeholder and replace it with the real sha below.
+        files = self.collect_candidate_output(candidate)
+        artifact_bytes = files["playable/index.html"]
+        checksum = self._sha256_bytes(artifact_bytes)
+        if not candidate.artifact_checksum or not hmac.compare_digest(checksum, candidate.artifact_checksum):
+            raise ValueError("candidate artifact checksum does not match the verified entry")
+        self._verify_candidate_manifest(candidate, files)
+        self._git.init_project(candidate.project_id)
+        sha = self._git.commit(
+            candidate.project_id,
+            message=f"promote candidate {candidate.id}",
+            files=files,
+        )
+        # Snapshot validation and checkpointing happen before this business gate,
+        # so a bad runtime tree cannot advance the current Playable pointer.
         version = self._lifecycle.promote_candidate(
             candidate_id,
             test_report_id=test_report_id,
             verdict=verdict,
-            git_commit=_PLACEHOLDER_COMMIT,
-            artifact_checksum=_PLACEHOLDER_COMMIT,
+            git_commit=sha,
+            artifact_checksum=checksum,
         )
-        # If the version was already promoted (idempotent lifecycle path) and
-        # already has a real checkpoint, leave it.
-        if version.git_commit and version.git_commit != _PLACEHOLDER_COMMIT:
-            return version
-
-        artifact_bytes = self._read_candidate_artifact(candidate)
-        self._git.init_project(candidate.project_id)
-        sha = self._git.commit(
-            candidate.project_id,
-            message=f"promote candidate {candidate.id} to playable v{version.number}",
-            files={"playable/index.html": artifact_bytes},
-        )
-        checksum = self._sha256_bytes(artifact_bytes)
         version.git_commit = sha
         version.artifact_checksum = checksum
         version.artifact_path = "playable/index.html"
         self.session.flush()
         self._git.tag(candidate.project_id, name=f"playable-{version.number}", sha=sha)
         return version
+
+    def restore(self, project_id: str, version_id: str) -> BuildCandidate:
+        """Create a retestable Candidate from an immutable Playable checkpoint."""
+
+        version = self.session.get(PlayableVersion, version_id)
+        if version is None or version.project_id != project_id:
+            raise ValueError("playable version does not belong to project")
+        if not version.git_commit:
+            raise ValueError("playable version has no immutable checkpoint")
+
+        candidate = self._lifecycle.restore_playable_version(project_id, version_id)
+        run = self.session.scalar(
+            select(Run).where(Run.build_id == candidate.build_id).order_by(Run.created_at.desc())
+        )
+        if run is not None and run.workspace_path and candidate.artifact_manifest_json:
+            entry = Path(run.workspace_path) / (candidate.artifact_path or "")
+            if entry.is_file():
+                return candidate
+
+        run_id = run.id if run is not None else f"run-{candidate.build_id}"
+        paths = self._workspace.prepare(run_id, run_id)
+        try:
+            try:
+                entries = self._git.list_files(project_id, version.git_commit, prefix="playable/")
+            except (GitStorageError, KeyError, ValueError) as cause:
+                raise ValueError("playable checkpoint is unavailable for restore") from cause
+            supported = [
+                item for item in entries
+                if Path(item.path).suffix.lower() in PLAYABLE_OUTPUT_EXTENSIONS
+            ]
+            if not any(item.path == "playable/index.html" for item in supported):
+                raise ValueError("playable checkpoint has no index.html entry")
+            if len(supported) > MAX_PLAYABLE_FILES:
+                raise ValueError(f"playable output has too many files (max {MAX_PLAYABLE_FILES})")
+            if sum(item.size_bytes for item in supported) > MAX_PLAYABLE_TOTAL_BYTES:
+                raise ValueError("playable output exceeds 100 MiB")
+
+            manifest: list[ArtifactManifestEntry] = []
+            for item in supported:
+                if item.size_bytes > MAX_PLAYABLE_FILE_BYTES:
+                    raise ValueError(f"playable output file exceeds 20 MiB: {item.path}")
+                relative = item.path.removeprefix("playable/")
+                target_relative = self._workspace.validate_member(
+                    paths.root,
+                    f"dist/{relative}",
+                    ["dist"],
+                )
+                try:
+                    content = self._git.read_file(project_id, version.git_commit, item.path)
+                except (GitStorageError, KeyError, ValueError) as cause:
+                    raise ValueError("playable checkpoint is unavailable for restore") from cause
+                target = paths.root / target_relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(content)
+                manifest.append(ArtifactManifestEntry(
+                    path=target_relative,
+                    kind="preview_entry" if relative == "index.html" else "asset",
+                    size_bytes=len(content),
+                    sha256=self._sha256_bytes(content),
+                ))
+
+            entry = next(item for item in manifest if item.kind == "preview_entry")
+            candidate.artifact_path = entry.path
+            candidate.artifact_checksum = entry.sha256
+            candidate.artifact_manifest_json = json.dumps(
+                [item.model_dump(mode="json") for item in manifest],
+                ensure_ascii=False,
+            )
+            if run is None:
+                run = Run(
+                    id=run_id,
+                    build_id=candidate.build_id,
+                    status="succeeded",
+                    last_sequence=0,
+                    workspace_path=str(paths.root),
+                    workspace_status="prepared",
+                    ended_at=utc_now(),
+                )
+                self.session.add(run)
+            else:
+                run.status = "succeeded"
+                run.workspace_path = str(paths.root)
+                run.workspace_status = "prepared"
+                run.ended_at = utc_now()
+            self.session.flush()
+            return candidate
+        except Exception:
+            self._workspace.discard(paths)
+            raise
 
     # -- Publish ----------------------------------------------------------- #
 
@@ -197,28 +311,91 @@ class CheckpointService:
 
     # -- internals --------------------------------------------------------- #
 
-    def _read_candidate_artifact(self, candidate: BuildCandidate) -> bytes:
-        """Read the candidate's real artifact bytes from its run workspace.
+    def collect_candidate_output(self, candidate: BuildCandidate) -> dict[str, bytes]:
+        """Collect a bounded, browser-runnable output tree for an immutable checkpoint."""
 
-        The artifact lives in the prepared run workspace (``Run.workspace_path``,
-        C13) at the candidate's relative ``artifact_path``. Falls back to reading
-        ``artifact_path`` directly if no run workspace is recorded (tests / legacy).
-        """
         rel = candidate.artifact_path or "index.html"
         run = self.session.scalar(
             select(Run).where(Run.build_id == candidate.build_id).order_by(Run.created_at.desc())
         )
-        candidates: list[Path] = []
-        if run is not None and run.workspace_path:
-            candidates.append(Path(run.workspace_path) / rel)
-        candidates.append(Path(rel))  # cwd fallback for tests without a workspace
-        for path in candidates:
-            if path.is_file():
-                return path.read_bytes()
-        raise ValueError(
-            f"candidate artifact not found on disk: {rel} "
-            f"(looked in run workspace and cwd)"
-        )
+        if run is None or not run.workspace_path:
+            raise ValueError("candidate artifact workspace is unavailable")
+        workspace_root = Path(run.workspace_path)
+        try:
+            normalized_entry = self._workspace.validate_member(workspace_root, rel)
+        except WorkspaceEscapeError as cause:
+            raise ValueError(f"candidate artifact workspace policy failed: {cause.message}") from cause
+        entry = workspace_root / normalized_entry
+        if not entry.is_file():
+            raise ValueError(f"candidate artifact not found in run workspace: {rel}")
+        output_root = entry.parent
+
+        accepted: list[tuple[Path, str, int]] = []
+        total_bytes = 0
+        for path in sorted(output_root.rglob("*"), key=lambda item: item.relative_to(output_root).as_posix()):
+            relative = path.relative_to(output_root)
+            if path.is_symlink():
+                raise ValueError(f"playable output symlink rejected: {relative.as_posix()}")
+            if not path.is_file():
+                continue
+            if any(part in _PROTECTED_OUTPUT_NAMES for part in relative.parts) or path.name.endswith(_PROTECTED_OUTPUT_SUFFIXES):
+                raise ValueError(f"protected playable output rejected: {relative.as_posix()}")
+            if any(part.startswith(".") for part in relative.parts):
+                continue
+            if path.suffix.lower() not in PLAYABLE_OUTPUT_EXTENSIONS:
+                continue
+            size = path.stat().st_size
+            if size > MAX_PLAYABLE_FILE_BYTES:
+                raise ValueError(f"playable output file exceeds 20 MiB: {relative.as_posix()}")
+            accepted.append((path, relative.as_posix(), size))
+            total_bytes += size
+            if len(accepted) > MAX_PLAYABLE_FILES:
+                raise ValueError(f"playable output has too many files (max {MAX_PLAYABLE_FILES})")
+            if total_bytes > MAX_PLAYABLE_TOTAL_BYTES:
+                raise ValueError("playable output exceeds 100 MiB")
+
+        files = {f"playable/{relative}": path.read_bytes() for path, relative, _ in accepted}
+        entry_relative = entry.resolve().relative_to(output_root).as_posix()
+        entry_key = f"playable/{entry_relative}"
+        if entry_key not in files or Path(entry_relative).name != "index.html":
+            raise ValueError("playable output requires an index.html entry")
+        if entry_key != "playable/index.html":
+            files["playable/index.html"] = files.pop(entry_key)
+        return files
+
+    def _verify_candidate_manifest(self, candidate: BuildCandidate, files: dict[str, bytes]) -> None:
+        if not candidate.artifact_manifest_json:
+            raise ValueError("candidate artifact manifest is unavailable; rebuild required")
+        try:
+            raw_entries = json.loads(candidate.artifact_manifest_json)
+            entries = [ArtifactManifestEntry.model_validate(item) for item in raw_entries]
+        except (TypeError, ValueError, json.JSONDecodeError) as cause:
+            raise ValueError("candidate artifact manifest is invalid; rebuild required") from cause
+
+        entry_path = (candidate.artifact_path or "index.html").replace("\\", "/")
+        entry_parent = entry_path.rpartition("/")[0]
+        expected: dict[str, str] = {}
+        for manifest_entry in entries:
+            path = manifest_entry.path.replace("\\", "/")
+            if entry_parent:
+                prefix = f"{entry_parent}/"
+                if not path.startswith(prefix):
+                    continue
+                path = path.removeprefix(prefix)
+            if any(part.startswith(".") for part in path.split("/")):
+                continue
+            if Path(path).suffix.lower() not in PLAYABLE_OUTPUT_EXTENSIONS:
+                continue
+            if not manifest_entry.sha256:
+                raise ValueError("candidate artifact manifest has an unhashed playable file")
+            expected[path] = manifest_entry.sha256
+
+        actual = {
+            path.removeprefix("playable/"): self._sha256_bytes(content)
+            for path, content in files.items()
+        }
+        if expected != actual:
+            raise ValueError("candidate artifact manifest does not match the verified output")
 
     @staticmethod
     def _sha256_bytes(data: bytes) -> str:

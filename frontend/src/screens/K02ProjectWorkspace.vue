@@ -683,7 +683,12 @@ onBeforeUnmount(() => {
           @resource-later="acknowledgeResourceBridge"
           @resource-review="reviewResources"
         />
-        <AssetGalleryReadOnly v-else-if="activeTab === 'assets' && (isBuildMode || isChangeMode)" :project-title="playable?.snapshot.projectTitle ?? session.spec.title" :npc-names="playable?.snapshot.npcNames ?? []" />
+        <AssetGalleryReadOnly
+          v-else-if="activeTab === 'assets' && (isBuildMode || isChangeMode)"
+          :project-id="session.backendProjectId"
+          :version-id="session.remoteBuild?.playableVersion?.version_id ?? null"
+          :project-title="playable?.snapshot.projectTitle ?? session.spec.title"
+        />
         <CodeReadOnlyState v-else-if="activeTab === 'code' && (isBuildMode || isChangeMode)" :project-title="playable?.snapshot.projectTitle ?? session.spec.title" />
         <ArtifactEmptyState v-else :tab="emptyArtifactTab" />
       </div>
