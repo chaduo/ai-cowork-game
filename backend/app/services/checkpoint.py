@@ -23,11 +23,15 @@ The content is committed under the C20 ``ALLOWED_TOP_DIRS`` layout: ``gdd/``,
 
 from __future__ import annotations
 
+import hmac
+import json
 from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.agents.workspace import WorkspaceEscapeError, WorkspaceManager
+from app.contracts.game_agent import ArtifactManifestEntry
 from app.models import (
     Build,
     BuildCandidate,
@@ -151,14 +155,16 @@ class CheckpointService:
 
         files = self.collect_candidate_output(candidate)
         artifact_bytes = files["playable/index.html"]
+        checksum = self._sha256_bytes(artifact_bytes)
+        if not candidate.artifact_checksum or not hmac.compare_digest(checksum, candidate.artifact_checksum):
+            raise ValueError("candidate artifact checksum does not match the verified entry")
+        self._verify_candidate_manifest(candidate, files)
         self._git.init_project(candidate.project_id)
         sha = self._git.commit(
             candidate.project_id,
             message=f"promote candidate {candidate.id}",
             files=files,
         )
-        checksum = self._sha256_bytes(artifact_bytes)
-
         # Snapshot validation and checkpointing happen before this business gate,
         # so a bad runtime tree cannot advance the current Playable pointer.
         version = self._lifecycle.promote_candidate(
@@ -215,22 +221,17 @@ class CheckpointService:
         run = self.session.scalar(
             select(Run).where(Run.build_id == candidate.build_id).order_by(Run.created_at.desc())
         )
-        entry_candidates: list[Path] = []
-        if run is not None and run.workspace_path:
-            entry_candidates.append(Path(run.workspace_path) / rel)
-        entry_candidates.append(Path(rel))
-
-        entry = next((path for path in entry_candidates if path.is_file()), None)
-        if entry is None:
-            raise ValueError(
-                f"candidate artifact not found on disk: {rel} "
-                f"(looked in run workspace and cwd)"
-            )
-        if entry.is_symlink():
-            raise ValueError("playable output symlink rejected")
-        output_root = entry.parent.resolve()
-        if output_root.is_symlink():
-            raise ValueError("playable output root symlink rejected")
+        if run is None or not run.workspace_path:
+            raise ValueError("candidate artifact workspace is unavailable")
+        workspace_root = Path(run.workspace_path)
+        try:
+            normalized_entry = WorkspaceManager().validate_member(workspace_root, rel)
+        except WorkspaceEscapeError as cause:
+            raise ValueError(f"candidate artifact workspace policy failed: {cause.message}") from cause
+        entry = workspace_root / normalized_entry
+        if not entry.is_file():
+            raise ValueError(f"candidate artifact not found in run workspace: {rel}")
+        output_root = entry.parent
 
         accepted: list[tuple[Path, str, int]] = []
         total_bytes = 0
@@ -264,6 +265,40 @@ class CheckpointService:
         if entry_key != "playable/index.html":
             files["playable/index.html"] = files.pop(entry_key)
         return files
+
+    def _verify_candidate_manifest(self, candidate: BuildCandidate, files: dict[str, bytes]) -> None:
+        if not candidate.artifact_manifest_json:
+            raise ValueError("candidate artifact manifest is unavailable; rebuild required")
+        try:
+            raw_entries = json.loads(candidate.artifact_manifest_json)
+            entries = [ArtifactManifestEntry.model_validate(item) for item in raw_entries]
+        except (TypeError, ValueError, json.JSONDecodeError) as cause:
+            raise ValueError("candidate artifact manifest is invalid; rebuild required") from cause
+
+        entry_path = (candidate.artifact_path or "index.html").replace("\\", "/")
+        entry_parent = entry_path.rpartition("/")[0]
+        expected: dict[str, str] = {}
+        for manifest_entry in entries:
+            path = manifest_entry.path.replace("\\", "/")
+            if entry_parent:
+                prefix = f"{entry_parent}/"
+                if not path.startswith(prefix):
+                    continue
+                path = path.removeprefix(prefix)
+            if any(part.startswith(".") for part in path.split("/")):
+                continue
+            if Path(path).suffix.lower() not in PLAYABLE_OUTPUT_EXTENSIONS:
+                continue
+            if not manifest_entry.sha256:
+                raise ValueError("candidate artifact manifest has an unhashed playable file")
+            expected[path] = manifest_entry.sha256
+
+        actual = {
+            path.removeprefix("playable/"): self._sha256_bytes(content)
+            for path, content in files.items()
+        }
+        if expected != actual:
+            raise ValueError("candidate artifact manifest does not match the verified output")
 
     @staticmethod
     def _sha256_bytes(data: bytes) -> str:

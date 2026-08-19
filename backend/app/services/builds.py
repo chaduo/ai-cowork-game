@@ -26,7 +26,7 @@ from app.contracts.game_agent import (
     WorkspaceRef,
 )
 from app.contracts.gamespec import CreatorGameSpec, RuntimeBuildSpec
-from app.models import Build, BuildContext, Project, Run, new_id, utc_now
+from app.models import Build, BuildCandidate, BuildContext, Project, Run, new_id, utc_now
 from app.repositories.runs import RUN_ACTIVE_STATUSES, RUN_EXECUTION_STATUSES, RunRepository
 from app.services.lifecycle import ProjectLifecycleService
 
@@ -319,6 +319,16 @@ class BuildService:
             diagnostics_json=diagnostics_json or None,
             build_context_id=self._ensure_context(build).id,
         )
+        candidate = self.session.scalar(select(BuildCandidate).where(BuildCandidate.build_id == build.id))
+        if candidate is not None:
+            candidate.artifact_manifest_json = (
+                json.dumps(
+                    [item.model_dump(mode="json") for item in result.artifact_manifest],
+                    ensure_ascii=False,
+                )
+                if result.status == "succeeded"
+                else None
+            )
         # C13: a non-success run leaves a partial workspace — discard it so a
         # later retry can never trust or reuse it. A succeeded run keeps its
         # workspace (the artifact lives there until C14/C20 promote/import it).

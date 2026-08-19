@@ -1,4 +1,6 @@
 import asyncio
+import hashlib
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -22,7 +24,8 @@ def seeded_app(isolated_database, tmp_path: Path):
         candidate = create_candidate(session, project, artifact_path="dist/index.html")
         workspace = tmp_path / "workspace"
         (workspace / "dist").mkdir(parents=True)
-        (workspace / "dist" / "index.html").write_text("<html><body>real candidate</body></html>", encoding="utf-8")
+        artifact = b"<html><body>real candidate</body></html>"
+        (workspace / "dist" / "index.html").write_bytes(artifact)
         session.add(Run(
             id=f"run-{candidate.build_id}",
             build_id=candidate.build_id,
@@ -31,7 +34,15 @@ def seeded_app(isolated_database, tmp_path: Path):
             workspace_path=str(workspace),
             workspace_status="prepared",
         ))
-        candidate.artifact_checksum = "c" * 64
+        candidate.artifact_checksum = hashlib.sha256(artifact).hexdigest()
+        candidate.artifact_manifest_json = json.dumps([
+            {
+                "path": "dist/index.html",
+                "kind": "preview_entry",
+                "sha256": candidate.artifact_checksum,
+                "size_bytes": len(artifact),
+            }
+        ])
         asyncio.run(CandidateTestService(session, FakeCandidateTestRunner("pass")).test_candidate(candidate.id))
         session.commit()
         return app, project.id, candidate.id, git

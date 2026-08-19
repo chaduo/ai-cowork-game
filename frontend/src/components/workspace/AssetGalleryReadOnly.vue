@@ -133,7 +133,7 @@ onBeforeUnmount(() => {
 
     <div v-if="selectedImage" class="asset-preview-backdrop" role="presentation" @click.self="selectedImage = null">
       <section class="asset-preview-dialog" role="dialog" aria-modal="true" :aria-label="selectedImage.name">
-        <header><div><strong>{{ selectedImage.name }}</strong><small>{{ selectedImage.path }} · {{ formatAssetSize(selectedImage.size_bytes) }}</small></div><button type="button" title="关闭预览" @click="selectedImage = null"><X :size="18" /></button></header>
+        <header><div><strong>{{ selectedImage.name }}</strong><small>{{ selectedImage.mime_type }} · {{ formatAssetSize(selectedImage.size_bytes) }} · {{ selectedImage.path }}</small></div><button type="button" title="关闭预览" @click="selectedImage = null"><X :size="18" /></button></header>
         <div><img :src="selectedImage.content_url" :alt="selectedImage.name" /></div>
       </section>
     </div>

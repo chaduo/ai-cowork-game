@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Literal
 
+from dulwich.errors import NotGitRepository
+
 from app.models import PlayableVersion
 from app.services.project_git import ProjectGitService
 
@@ -48,7 +50,10 @@ class PlayableAssetService:
     def list_assets(self, version: PlayableVersion) -> list[PlayableAsset]:
         if not version.git_commit:
             raise ValueError("playable version has no immutable checkpoint")
-        entries = self._git.list_files(version.project_id, version.git_commit, prefix="playable/")
+        try:
+            entries = self._git.list_files(version.project_id, version.git_commit, prefix="playable/")
+        except (KeyError, NotGitRepository) as cause:
+            raise ValueError("playable checkpoint is unavailable") from cause
         assets: list[PlayableAsset] = []
         for entry in entries:
             relative_path = entry.path.removeprefix("playable/")
@@ -66,7 +71,7 @@ class PlayableAssetService:
             raise ValueError("playable version has no immutable checkpoint")
         try:
             content = self._git.read_file(version.project_id, version.git_commit, f"playable/{path}")
-        except KeyError as cause:
+        except (KeyError, NotGitRepository) as cause:
             raise ValueError("playable asset not found") from cause
         return self._asset(path, len(content)) or asset, content
 

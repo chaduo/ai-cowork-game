@@ -19,6 +19,7 @@ verifies the on-disk commit (no silent drift).
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -156,6 +157,15 @@ def _candidate_with_artifact(
     session.flush()
     candidate = BuildCandidate(project_id=project_id, build_id=build.id, status="succeeded",
                                 artifact_path=artifact_path, artifact_checksum=hashlib.sha256(artifact).hexdigest(), summary="c")
+    candidate.artifact_manifest_json = json.dumps([
+        {
+            "path": path,
+            "kind": "preview_entry" if path == artifact_path else "asset",
+            "size_bytes": len(content),
+            "sha256": hashlib.sha256(content).hexdigest(),
+        }
+        for path, content in [(artifact_path, artifact), *((extra_files or {}).items())]
+    ])
     session.add(candidate)
     session.flush()
     # C14 Promote is intentionally stricter than the original C20 checkpoint
@@ -301,6 +311,127 @@ def test_snapshot_rejects_symlink_without_advancing_playable(
             CheckpointService(session, git=git).promote(
                 candidate.id, test_report_id="report", verdict="pass",
             )
+
+        project = session.get(Project, project_id)
+        assert candidate.status == "succeeded"
+        assert project is not None and project.current_playable_version_id is None
+
+
+def test_snapshot_rejects_artifact_path_outside_run_workspace(
+    isolated_database,
+    tmp_path: Path,
+    git: ProjectGitService,
+) -> None:
+    with Session(isolated_database) as session:
+        project_id, _, _ = _confirmed_project(session)
+        workspace = tmp_path / "ws" / project_id
+        candidate = _candidate_with_artifact(session, project_id, workspace, b"<html>inside</html>")
+        outside = workspace.parent / "outside"
+        outside.mkdir()
+        (outside / "index.html").write_bytes(b"<html>outside</html>")
+        (outside / "host.png").write_bytes(b"host file")
+        candidate.artifact_path = "../outside/index.html"
+        candidate.artifact_checksum = hashlib.sha256(b"<html>outside</html>").hexdigest()
+
+        with pytest.raises(ValueError, match="workspace"):
+            CheckpointService(session, git=git).promote(candidate.id, test_report_id="report", verdict="pass")
+
+        project = session.get(Project, project_id)
+        assert candidate.status == "succeeded"
+        assert project is not None and project.current_playable_version_id is None
+
+
+def test_snapshot_rejects_symlinked_entry_parent(
+    isolated_database,
+    tmp_path: Path,
+    git: ProjectGitService,
+) -> None:
+    with Session(isolated_database) as session:
+        project_id, _, _ = _confirmed_project(session)
+        workspace = tmp_path / "ws" / project_id
+        candidate = _candidate_with_artifact(
+            session,
+            project_id,
+            workspace,
+            b"<html>inside</html>",
+            artifact_path="dist/index.html",
+        )
+        outside = tmp_path / "outside-output"
+        outside.mkdir()
+        (outside / "index.html").write_bytes(b"<html>inside</html>")
+        (workspace / "dist" / "index.html").unlink()
+        (workspace / "dist").rmdir()
+        (workspace / "dist").symlink_to(outside, target_is_directory=True)
+
+        with pytest.raises(ValueError, match="symlink"):
+            CheckpointService(session, git=git).promote(candidate.id, test_report_id="report", verdict="pass")
+
+        project = session.get(Project, project_id)
+        assert candidate.status == "succeeded"
+        assert project is not None and project.current_playable_version_id is None
+
+
+def test_snapshot_rejects_entry_changed_after_candidate_creation(
+    isolated_database,
+    tmp_path: Path,
+    git: ProjectGitService,
+) -> None:
+    with Session(isolated_database) as session:
+        project_id, _, _ = _confirmed_project(session)
+        workspace = tmp_path / "ws" / project_id
+        candidate = _candidate_with_artifact(session, project_id, workspace, b"<html>verified</html>")
+        (workspace / "index.html").write_bytes(b"<html>changed</html>")
+
+        with pytest.raises(ValueError, match="checksum"):
+            CheckpointService(session, git=git).promote(candidate.id, test_report_id="report", verdict="pass")
+
+        project = session.get(Project, project_id)
+        assert candidate.status == "succeeded"
+        assert project is not None and project.current_playable_version_id is None
+
+
+def test_snapshot_rejects_sibling_asset_changed_after_candidate_creation(
+    isolated_database,
+    tmp_path: Path,
+    git: ProjectGitService,
+) -> None:
+    with Session(isolated_database) as session:
+        project_id, _, _ = _confirmed_project(session)
+        workspace = tmp_path / "ws" / project_id
+        candidate = _candidate_with_artifact(
+            session,
+            project_id,
+            workspace,
+            b"<html>verified</html>",
+            extra_files={"assets/hero.png": b"verified image"},
+        )
+        (workspace / "assets" / "hero.png").write_bytes(b"changed image")
+
+        with pytest.raises(ValueError, match="manifest"):
+            CheckpointService(session, git=git).promote(candidate.id, test_report_id="report", verdict="pass")
+
+        project = session.get(Project, project_id)
+        assert candidate.status == "succeeded"
+        assert project is not None and project.current_playable_version_id is None
+
+
+def test_snapshot_requires_verified_artifact_manifest(
+    isolated_database,
+    tmp_path: Path,
+    git: ProjectGitService,
+) -> None:
+    with Session(isolated_database) as session:
+        project_id, _, _ = _confirmed_project(session)
+        candidate = _candidate_with_artifact(
+            session,
+            project_id,
+            tmp_path / "ws" / project_id,
+            b"<html>legacy candidate</html>",
+        )
+        candidate.artifact_manifest_json = None
+
+        with pytest.raises(ValueError, match="rebuild required"):
+            CheckpointService(session, git=git).promote(candidate.id, test_report_id="report", verdict="pass")
 
         project = session.get(Project, project_id)
         assert candidate.status == "succeeded"

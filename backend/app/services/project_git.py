@@ -305,14 +305,18 @@ class ProjectGitService:
     def _lookup_path(self, repo: Repo, tree, rel_path: str):
         parts = rel_path.split("/")
         current = tree
-        for part in parts:
+        for index, part in enumerate(parts):
             mode, sha = current[part.encode("utf-8")]
             obj = repo.get_object(sha)
-            from dulwich.objects import Tree as _Tree
-            if isinstance(obj, _Tree):
+            is_last = index == len(parts) - 1
+            if isinstance(obj, Tree):
+                if is_last:
+                    return None
                 current = obj
                 continue
-            return obj
+            if isinstance(obj, Blob) and is_last:
+                return obj
+            return None
         return None
 
     @staticmethod

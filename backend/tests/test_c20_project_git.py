@@ -117,6 +117,14 @@ def test_read_file_missing_raises(service: ProjectGitService) -> None:
         service.read_file("p", sha, "playable/missing.html")
 
 
+def test_read_file_rejects_descendant_path_after_blob(service: ProjectGitService) -> None:
+    service.init_project("p")
+    sha = service.commit("p", message="m", files={"playable/main.js": b"javascript"})
+
+    with pytest.raises(KeyError):
+        service.read_file("p", sha, "playable/main.js/fake.png")
+
+
 def test_read_file_nonexistent_commit_raises(service: ProjectGitService) -> None:
     service.init_project("p")
     with pytest.raises(ValueError):

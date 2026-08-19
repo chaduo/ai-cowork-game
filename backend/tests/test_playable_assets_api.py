@@ -1,6 +1,7 @@
 from pathlib import Path
 from urllib.parse import quote
 
+from dulwich.repo import Repo
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -121,7 +122,14 @@ def test_asset_content_rejects_unsafe_or_non_asset_paths(isolated_database, tmp_
     })
     client = _client(isolated_database, git)
 
-    for path in ("../assets/hero.png", "/assets/hero.png", "main.js", "https://example.test/a.png"):
+    for path in (
+        "../assets/hero.png",
+        "/assets/hero.png",
+        "main.js",
+        "main.js/fake.png",
+        "assets/hero.png/fake.svg",
+        "https://example.test/a.png",
+    ):
         response = client.get(
             f"/api/v1/projects/{project_id}/playable-versions/{version_id}/assets/content",
             params={"path": path},
@@ -146,3 +154,51 @@ def test_asset_routes_enforce_project_version_ownership(isolated_database, tmp_p
     assert first_project != second_project
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "playable_version_not_found"
+
+
+def test_asset_routes_map_missing_project_repository_to_typed_errors(isolated_database, tmp_path: Path) -> None:
+    project_id, version_id, _, _ = _seed_playable(isolated_database, tmp_path / "seed", {
+        "index.html": b"<html></html>",
+        "hero.png": b"png",
+    })
+    client = _client(isolated_database, ProjectGitService(repo_root=tmp_path / "missing-repos"))
+
+    inventory = client.get(f"/api/v1/projects/{project_id}/playable-versions/{version_id}/assets")
+    content = client.get(
+        f"/api/v1/projects/{project_id}/playable-versions/{version_id}/assets/content",
+        params={"path": "hero.png"},
+    )
+
+    assert inventory.status_code == 409
+    assert inventory.json()["error"]["code"] == "playable_assets_unavailable"
+    assert content.status_code == 404
+    assert content.json()["error"]["code"] == "playable_asset_not_found"
+
+
+def test_asset_routes_map_missing_git_blob_to_typed_errors(isolated_database, tmp_path: Path) -> None:
+    project_id, version_id, commit, git = _seed_playable(isolated_database, tmp_path, {
+        "index.html": b"<html></html>",
+        "hero.png": b"png",
+    })
+    repo = Repo(str(tmp_path / "project-repos" / project_id))
+    try:
+        commit_object = repo.get_object(commit.encode())
+        root = repo.get_object(commit_object.tree)
+        playable = repo.get_object(root[b"playable"][1])
+        blob_sha = playable[b"hero.png"][1].decode("ascii")
+        blob_path = Path(repo.object_store.path) / blob_sha[:2] / blob_sha[2:]
+    finally:
+        repo.close()
+    blob_path.unlink()
+
+    client = _client(isolated_database, git)
+    inventory = client.get(f"/api/v1/projects/{project_id}/playable-versions/{version_id}/assets")
+    content = client.get(
+        f"/api/v1/projects/{project_id}/playable-versions/{version_id}/assets/content",
+        params={"path": "hero.png"},
+    )
+
+    assert inventory.status_code == 409
+    assert inventory.json()["error"]["code"] == "playable_assets_unavailable"
+    assert content.status_code == 404
+    assert content.json()["error"]["code"] == "playable_asset_not_found"

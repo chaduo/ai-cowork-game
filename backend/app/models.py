@@ -224,6 +224,7 @@ class BuildCandidate(Base):
     repair_round: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     artifact_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     artifact_checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    artifact_manifest_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     diagnostics_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
