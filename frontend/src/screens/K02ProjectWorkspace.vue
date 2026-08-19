@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowLeft, ArrowRight, Check, ChevronRight, CircleX, FileCode2, Gamepad2, Hammer, Image, LoaderCircle, MonitorPlay, Rocket, ScrollText, ShieldCheck, SlidersHorizontal, ThumbsDown } from 'lucide-vue-next'
+import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, CircleX, FileCode2, Gamepad2, Hammer, Image, LoaderCircle, MonitorPlay, Rocket, ScrollText, ShieldCheck, SlidersHorizontal, ThumbsDown } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AssetGalleryReadOnly from '../components/workspace/AssetGalleryReadOnly.vue'
 import ArtifactEmptyState from '../components/workspace/ArtifactEmptyState.vue'
@@ -41,6 +41,7 @@ import {
   refreshRemoteCandidateTest,
   refreshRemoteHumanReview,
   refreshRemotePlayable,
+  ensureRemoteCandidateVerification,
   restoreRemoteWorkspacePhase,
   reviewRemoteCandidate,
   promoteRemoteCandidate,
@@ -294,11 +295,17 @@ function cancelBuildStage() {
   else cancelBuild(session.id)
 }
 
-function runCandidateTest() {
-  void testRemoteCandidate(session.id)
+async function retryCandidateTest() {
+  await testRemoteCandidate(session.id)
+  void ensureRemoteCandidateVerification(session.id)
 }
 
 function rebuildCandidate() {
+  if ((session.remoteBuild?.repairRound ?? 0) >= 3 || session.remoteBuild?.humanReview?.decision === 'rejected') {
+    session.remoteBuild = null
+    void startRemoteBuild(session.id, '重新生成一个完整 Candidate，并保持已确认的 GameSpec 与不受影响的行为不变。')
+    return
+  }
   void rebuildRemoteCandidate(session.id)
 }
 
@@ -538,44 +545,49 @@ onBeforeUnmount(() => {
           <span class="confirmed-icon"><Check :size="26" /></span>
           <span>BUILD CANDIDATE READY</span>
           <h2>真实 Build 已生成候选版本</h2>
-          <p>OpenGame 已生成构建产物。它还没有成为 Playable，需要先完成平台验证和人工试玩确认。</p>
+          <p>平台验证会自动执行；通过后仍需你完成人工试玩确认，才可决定是否 Promote。</p>
           <dl class="candidate-ready-meta">
             <div><dt>Candidate</dt><dd>{{ session.remoteBuild?.candidateId }}</dd></div>
             <div><dt>入口</dt><dd>{{ session.remoteBuild?.artifactPath ?? '已生成，等待验证' }}</dd></div>
           </dl>
           <div class="candidate-test-gate" :class="`is-${session.remoteBuild?.testGateStatus ?? 'untested'}`">
             <div>
-              <strong>{{ session.remoteBuild?.testGateStatus === 'ready' ? '平台验证通过' : session.remoteBuild?.testGateStatus && session.remoteBuild.testGateStatus !== 'untested' ? '平台验证未通过' : '等待平台验证' }}</strong>
-              <p v-if="session.remoteBuild?.testReport">{{ session.remoteBuild.testGateStatus === 'ready' ? '真实浏览器检查与核心玩法证据均已通过。' : '平台验证发现阻塞项，Candidate 尚不能进入人工试玩确认。' }}</p>
-              <p v-else-if="session.remoteBuild?.testGateStatus === 'untested' || !session.remoteBuild?.testGateStatus">将使用真实 Chrome 检查页面启动、控制台、核心输入、玩法和完成条件。</p>
-              <p v-else>正在读取已保存的验证证据。</p>
+              <strong v-if="session.remoteBuild?.testRunning" class="candidate-gate-status"><LoaderCircle :size="15" class="spin" />Chrome 正在执行平台验证</strong>
+              <strong v-else-if="session.remoteBuild?.repairRunning" class="candidate-gate-status"><LoaderCircle :size="15" class="spin" />正在生成修复 Candidate</strong>
+              <strong v-else-if="session.remoteBuild?.testGateStatus === 'ready'" class="candidate-gate-status is-ready"><Check :size="15" />平台验证通过</strong>
+              <strong v-else-if="(session.remoteBuild?.repairRound ?? 0) >= 3" class="candidate-gate-status is-failed"><CircleX :size="15" />自动修复已停止</strong>
+              <strong v-else-if="session.remoteBuild?.testError" class="candidate-gate-status is-failed"><CircleX :size="15" />平台验证已中断</strong>
+              <strong v-else class="candidate-gate-status"><LoaderCircle :size="15" class="spin" />准备平台验证</strong>
+              <p v-if="session.remoteBuild?.repairRunning">第 {{ session.remoteBuild.repairRound }} / 3 轮修复正在后台构建，完成后会自动重新验证。</p>
+              <p v-else-if="session.remoteBuild?.testGateStatus === 'ready'">真实浏览器检查与核心玩法证据均已通过。</p>
+              <p v-else-if="(session.remoteBuild?.repairRound ?? 0) >= 3">三轮自动修复后仍有阻塞项。可显式开始一次新的 Build。</p>
+              <p v-else-if="session.remoteBuild?.testError">{{ session.remoteBuild.testError }}</p>
+              <p v-else>真实 Chrome 会检查页面启动、控制台、核心输入、玩法循环和完成条件。</p>
             </div>
-            <button v-if="!session.remoteBuild?.testReport" type="button" :disabled="session.remoteBuild?.testRunning || (session.remoteBuild?.testGateStatus !== undefined && session.remoteBuild.testGateStatus !== 'untested')" @click="runCandidateTest">
-              <LoaderCircle v-if="session.remoteBuild?.testRunning" :size="15" class="spin" />
-              <Check v-else :size="15" />
-              {{ session.remoteBuild?.testRunning ? '正在验证' : '运行平台验证' }}
-            </button>
-            <button v-else-if="session.remoteBuild.testGateStatus !== 'ready'" type="button" @click="rebuildCandidate"><Hammer :size="15" />重新构建 Candidate</button>
+            <button v-if="(session.remoteBuild?.repairRound ?? 0) >= 3 && !session.remoteBuild?.testRunning && !session.remoteBuild?.repairRunning" type="button" @click="rebuildCandidate"><Hammer :size="15" />重新尝试</button>
+            <button v-else-if="session.remoteBuild?.testError && !session.remoteBuild?.testReport" type="button" @click="retryCandidateTest"><Check :size="15" />重新验证</button>
           </div>
-          <p v-if="session.remoteBuild?.testError" class="candidate-test-error">{{ session.remoteBuild.testError }}</p>
-          <ul v-if="session.remoteBuild?.testReport" class="candidate-evidence-list" aria-label="平台验证证据">
-            <li v-for="evidence in session.remoteBuild.testReport.evidence" :key="evidence.id" :class="`is-${evidence.status}`">
-              <Check v-if="evidence.status === 'passed'" :size="14" />
-              <CircleX v-else :size="14" />
-              <span><strong>{{ evidenceLabels[evidence.kind] ?? evidence.kind }}</strong><small>{{ evidenceObserved(evidence) }}</small></span>
-            </li>
-          </ul>
-          <section v-if="session.remoteBuild?.candidatePreviewUrl" class="candidate-live-preview" aria-label="Candidate 人工试玩预览">
-            <header>
-              <div><strong>Candidate 人工试玩</strong><span>这是待审核构建，不会覆盖当前 Playable</span></div>
-              <Gamepad2 :size="16" />
-            </header>
-            <iframe
-              :src="session.remoteBuild.candidatePreviewUrl"
-              title="Candidate 人工试玩预览"
-              sandbox="allow-scripts allow-same-origin"
-            ></iframe>
-          </section>
+          <details class="candidate-test-details">
+            <summary><MonitorPlay :size="15" /><span>查看浏览器测试详情</span><ChevronDown :size="14" /></summary>
+            <div class="candidate-test-details-body">
+              <p v-if="session.remoteBuild?.testRunning">Chrome 正在执行页面启动、核心输入、玩法循环与完成条件检查。</p>
+              <p v-else-if="session.remoteBuild?.repairRunning">修复 Build 完成后，平台会在新的 Candidate 上重新执行相同检查。</p>
+              <p v-else-if="!session.remoteBuild?.testReport">验证证据生成后会显示在这里。</p>
+              <iframe
+                v-if="session.remoteBuild?.candidatePreviewUrl"
+                :src="session.remoteBuild.candidatePreviewUrl"
+                title="Candidate 预览"
+                sandbox="allow-scripts allow-same-origin"
+              ></iframe>
+              <ul v-if="session.remoteBuild?.testReport" class="candidate-evidence-list" aria-label="平台验证证据">
+                <li v-for="evidence in session.remoteBuild.testReport.evidence" :key="evidence.id" :class="`is-${evidence.status}`">
+                  <Check v-if="evidence.status === 'passed'" :size="14" />
+                  <CircleX v-else :size="14" />
+                  <span><strong>{{ evidenceLabels[evidence.kind] ?? evidence.kind }}</strong><small>{{ evidenceObserved(evidence) }}</small></span>
+                </li>
+              </ul>
+            </div>
+          </details>
           <section class="human-play-gate" :class="`is-${session.remoteBuild?.humanReview?.decision ?? 'pending'}`" aria-label="Human Play Review">
             <div class="human-play-gate-heading">
               <ShieldCheck :size="18" />

@@ -657,19 +657,20 @@ export async function startRemoteBuild(
     buildId,
     runId,
     status: 'running',
-    candidateId: null,
+    candidateId: isRepairBuild ? existing?.candidateId ?? null : null,
     artifactPath: null,
     errorCode: null,
     errorMessage: null,
     testGateStatus: isRepairBuild ? existing?.testGateStatus : undefined,
     testReport: isRepairBuild ? existing?.testReport : null,
+    candidatePreviewUrl: isRepairBuild ? existing?.candidatePreviewUrl : null,
     attempt: isRepairBuild ? existing?.attempt : undefined,
     repairRound,
     repairRunning: repairRound !== undefined,
     playableVersion: existing?.playableVersion ?? null,
     previewUrl: existing?.previewUrl ?? null,
   }
-  session.phase = 'build_starting'
+  session.phase = isRepairBuild ? 'candidate_ready' : 'build_starting'
   touchProject(session)
   startRemoteBuildPolling(projectId)
 

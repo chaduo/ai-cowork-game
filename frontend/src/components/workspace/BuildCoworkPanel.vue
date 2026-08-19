@@ -34,7 +34,7 @@ const currentEvent = computed(() => buildEvents.find((event) => !completed.value
 
     <div class="cowork-stage-context">
       <span>当前阶段</span><strong>{{ stage }}</strong>
-      <p>{{ phase === 'playable_ready' ? '第一版已通过全部验证，可以稳定试玩。' : phase === 'candidate_ready' ? '构建产物已经生成，等待平台验证和人工试玩确认。' : '按 GameSpec 逐步完成游戏，并保留可追踪的验证证据。' }}</p>
+      <p>{{ phase === 'playable_ready' ? '第一版已通过全部验证，可以稳定试玩。' : phase === 'candidate_ready' ? '平台验证会自动执行；通过后仍需你完成人工试玩确认。' : '按 GameSpec 逐步完成游戏，并保留可追踪的验证证据。' }}</p>
     </div>
 
     <div class="build-activity" aria-live="polite">
@@ -45,7 +45,7 @@ const currentEvent = computed(() => buildEvents.find((event) => !completed.value
         <div><FileCode2 :size="12" />已记录功能结果与构建证据</div>
       </details>
 
-      <div v-if="phase === 'candidate_ready'" class="activity-current is-ready"><Check :size="14" /><span><strong>Build Candidate 已生成</strong><small>Build 已结束，接下来由平台独立验证产物。</small></span></div>
+      <div v-if="phase === 'candidate_ready'" class="activity-current is-ready"><Check :size="14" /><span><strong>Build Candidate 已生成</strong><small>平台验证在后台执行，Human Play Review 保持为显式操作。</small></span></div>
       <div v-else-if="phase === 'build_error'" class="activity-current is-error"><TriangleAlert :size="14" /><span><strong>{{ props.errorCode ? `Build 失败 · ${props.errorCode}` : 'Build 失败' }}</strong><small>{{ props.errorMessage ?? '已完成的内容保持不变，可以重试构建。' }}</small></span></div>
       <div v-else-if="phase === 'auto_fixing'" class="activity-current"><LoaderCircle :size="14" class="spin" /><span><strong>正在修复代际触发流程</strong><small>修复后会自动重新验证失败项。</small></span></div>
       <div v-else-if="phase !== 'playable_ready' && currentEvent" class="activity-current"><LoaderCircle :size="14" class="spin" /><span><strong>{{ currentEvent.label }}</strong><small>{{ currentEvent.detail }}</small></span></div>
