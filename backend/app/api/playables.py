@@ -210,8 +210,14 @@ def preview_playable_version(project_id: str, version_id: str, request: Request)
             raise ApiError("preview_not_found", "Playable preview is not available", [], 404)
 
         root = Path(run.workspace_path)
+        workspace_manager = WorkspaceManager()
         try:
-            relative_path = WorkspaceManager().validate_member(root, version.artifact_path)
+            # The promoted immutable checkpoint is stored under playable/, but
+            # the source Run workspace retains the provider-relative candidate
+            # path (usually index.html). Validate both paths before serving.
+            workspace_manager.validate_member(root, version.artifact_path)
+            source_path = candidate.artifact_path or version.artifact_path
+            relative_path = workspace_manager.validate_member(root, source_path)
         except WorkspaceEscapeError as cause:
             raise ApiError(
                 "preview_path_rejected",
