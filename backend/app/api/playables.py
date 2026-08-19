@@ -373,7 +373,11 @@ def restore_playable_version(project_id: str, version_id: str, request: Request)
         if session.get(Project, project_id) is None:
             raise ApiError("project_not_found", "Project not found", [], 404)
         try:
-            candidate = ProjectLifecycleService(session).restore_playable_version(project_id, version_id)
+            candidate = CheckpointService(
+                session,
+                git=request.app.state.project_git,
+                workspace_manager=getattr(request.app.state, "workspace_manager", None),
+            ).restore(project_id, version_id)
             session.commit()
             return _restore_response(candidate)
         except ValueError as cause:

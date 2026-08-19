@@ -28,9 +28,19 @@ platform, deterministic. See pyproject.toml.
 from __future__ import annotations
 
 import os
+import zlib
 from dataclasses import dataclass
 from pathlib import Path
 
+from dulwich.errors import (
+    ChecksumMismatch,
+    FileFormatException,
+    NotGitRepository,
+    ObjectFormatException,
+    ObjectMissing,
+    RefFormatError,
+    WrongObjectException,
+)
 from dulwich.objects import Blob, Tree, Commit
 from dulwich.repo import Repo
 
@@ -54,6 +64,23 @@ class ContentPolicyError(ValueError):
     The message is sanitized (no raw content), so it is safe to surface as a
     diagnostic / audit reason.
     """
+
+
+class GitStorageError(RuntimeError):
+    """The trusted repository or one of its stored objects cannot be read."""
+
+
+_GIT_STORAGE_ERRORS = (
+    ChecksumMismatch,
+    FileFormatException,
+    NotGitRepository,
+    ObjectFormatException,
+    ObjectMissing,
+    RefFormatError,
+    WrongObjectException,
+    OSError,
+    zlib.error,
+)
 
 
 @dataclass(frozen=True)
@@ -141,7 +168,10 @@ class ProjectGitService:
         """Fetch ``rel_path`` as of commit ``sha`` (provenance recovery)."""
         self._validate_member(rel_path)
         repo_path = self._root / project_id
-        repo = Repo(str(repo_path))
+        try:
+            repo = Repo(str(repo_path))
+        except _GIT_STORAGE_ERRORS as cause:
+            raise GitStorageError("project repository is unavailable") from cause
         try:
             try:
                 obj = repo.get_object(sha.encode())
@@ -154,6 +184,8 @@ class ProjectGitService:
             if blob is None:
                 raise KeyError(f"file not in commit {sha}: {rel_path}")
             return blob.data
+        except _GIT_STORAGE_ERRORS as cause:
+            raise GitStorageError("project repository object is unreadable") from cause
         finally:
             repo.close()
 
@@ -171,7 +203,10 @@ class ProjectGitService:
             normalized_prefix = prefix.replace("\\", "/").strip().strip("/")
 
         repo_path = self._root / project_id
-        repo = Repo(str(repo_path))
+        try:
+            repo = Repo(str(repo_path))
+        except _GIT_STORAGE_ERRORS as cause:
+            raise GitStorageError("project repository is unavailable") from cause
         try:
             try:
                 commit = repo.get_object(sha.encode())
@@ -198,6 +233,8 @@ class ProjectGitService:
 
             walk(root)
             return sorted(entries, key=lambda item: item.path)
+        except _GIT_STORAGE_ERRORS as cause:
+            raise GitStorageError("project repository object is unreadable") from cause
         finally:
             repo.close()
 

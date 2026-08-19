@@ -32,10 +32,10 @@ def _seed_playable(isolated_database, tmp_path: Path, files: dict[str, bytes]):
         return project_id, version.id, version.git_commit, git
 
 
-def _client(isolated_database, git: ProjectGitService) -> TestClient:
+def _client(isolated_database, git: ProjectGitService, *, raise_server_exceptions: bool = True) -> TestClient:
     app = create_app(Settings(database_url=str(isolated_database.url)))
     app.state.project_git = git
-    return TestClient(app)
+    return TestClient(app, raise_server_exceptions=raise_server_exceptions)
 
 
 def test_lists_real_assets_from_immutable_playable_commit(isolated_database, tmp_path: Path) -> None:
@@ -192,6 +192,36 @@ def test_asset_routes_map_missing_git_blob_to_typed_errors(isolated_database, tm
     blob_path.unlink()
 
     client = _client(isolated_database, git)
+    inventory = client.get(f"/api/v1/projects/{project_id}/playable-versions/{version_id}/assets")
+    content = client.get(
+        f"/api/v1/projects/{project_id}/playable-versions/{version_id}/assets/content",
+        params={"path": "hero.png"},
+    )
+
+    assert inventory.status_code == 409
+    assert inventory.json()["error"]["code"] == "playable_assets_unavailable"
+    assert content.status_code == 404
+    assert content.json()["error"]["code"] == "playable_asset_not_found"
+
+
+def test_asset_routes_map_corrupt_git_blob_to_typed_errors(isolated_database, tmp_path: Path) -> None:
+    project_id, version_id, commit, git = _seed_playable(isolated_database, tmp_path, {
+        "index.html": b"<html></html>",
+        "hero.png": b"png",
+    })
+    repo = Repo(str(tmp_path / "project-repos" / project_id))
+    try:
+        commit_object = repo.get_object(commit.encode())
+        root = repo.get_object(commit_object.tree)
+        playable = repo.get_object(root[b"playable"][1])
+        blob_sha = playable[b"hero.png"][1].decode("ascii")
+        blob_path = Path(repo.object_store.path) / blob_sha[:2] / blob_sha[2:]
+    finally:
+        repo.close()
+    blob_path.chmod(0o644)
+    blob_path.write_bytes(b"not a valid loose git object")
+
+    client = _client(isolated_database, git, raise_server_exceptions=False)
     inventory = client.get(f"/api/v1/projects/{project_id}/playable-versions/{version_id}/assets")
     content = client.get(
         f"/api/v1/projects/{project_id}/playable-versions/{version_id}/assets/content",

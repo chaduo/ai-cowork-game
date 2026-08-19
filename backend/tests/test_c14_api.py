@@ -4,8 +4,10 @@ import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.agents.workspace import WorkspaceManager
 from app.agents.fake_candidate_test_runner import FakeCandidateTestRunner
 from app.config import Settings
 from app.main import create_app
@@ -19,6 +21,7 @@ def seeded_app(isolated_database, tmp_path: Path):
     app = create_app(Settings(database_url=str(isolated_database.url)))
     git = ProjectGitService(repo_root=tmp_path / "project-repos")
     app.state.project_git = git
+    app.state.workspace_manager = WorkspaceManager(tmp_path / "restore-workspaces")
     with Session(app.state.engine) as session:
         project = confirmed_project(session)
         candidate = create_candidate(session, project, artifact_path="dist/index.html")
@@ -81,6 +84,30 @@ def test_review_promote_and_restore_api_are_explicit_and_idempotent(isolated_dat
     assert restored.status_code == 201
     assert restored.json()["test_gate_status"] == "untested"
     assert restored.json()["source_playable_version_id"] == promoted.json()["version_id"]
+
+    restored_id = restored.json()["candidate_id"]
+    with Session(app.state.engine) as session:
+        restored_candidate = session.get(BuildCandidate, restored_id)
+        restored_run = session.scalar(select(Run).where(Run.build_id == restored_candidate.build_id))
+        assert restored_candidate.artifact_path == "dist/index.html"
+        assert restored_candidate.artifact_manifest_json is not None
+        assert restored_run is not None and restored_run.workspace_path
+        assert (Path(restored_run.workspace_path) / "dist" / "index.html").read_bytes() == b"<html><body>real candidate</body></html>"
+
+    tested = client.post(f"/api/v1/candidates/{restored_id}/test")
+    assert tested.status_code == 200
+    accepted = client.post(
+        f"/api/v1/candidates/{restored_id}/human-play-review",
+        json={"decision": "accepted", "notes": "Restored version still works"},
+    )
+    assert accepted.status_code == 200
+    restored_version = client.post(
+        f"/api/v1/candidates/{restored_id}/promote",
+        json={"git_commit": "ignored-client-placeholder"},
+    )
+    assert restored_version.status_code == 200
+    assert restored_version.json()["number"] == 2
+    assert restored_version.json()["parent_version_id"] == promoted.json()["version_id"]
 
 
 def test_promote_api_returns_gate_error_without_human_review(isolated_database, tmp_path: Path) -> None:
