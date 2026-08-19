@@ -342,4 +342,3 @@ Expected: no whitespace errors; only intentional generated test data may remain 
 - [ ] **Step 4: Review acceptance requirements against evidence**
 
 Confirm the tests prove recursive image/audio/font snapshot, thumbnail content delivery, post-workspace-deletion reads, legacy empty state, and unsafe/cross-project rejection. Record any unverified manual browser behavior explicitly instead of claiming it passed.
-

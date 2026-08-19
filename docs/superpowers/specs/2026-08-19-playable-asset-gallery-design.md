@@ -132,4 +132,3 @@ Frontend contract and build tests cover:
 4. Confirm inventory and content still load from the immutable Playable commit.
 5. Confirm a legacy HTML-only Playable shows the honest empty state.
 6. Confirm cross-project and unsafe asset paths are rejected.
-

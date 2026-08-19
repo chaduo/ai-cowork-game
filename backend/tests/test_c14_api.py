@@ -92,6 +92,7 @@ def test_review_promote_and_restore_api_are_explicit_and_idempotent(isolated_dat
         assert restored_candidate.artifact_path == "dist/index.html"
         assert restored_candidate.artifact_manifest_json is not None
         assert restored_run is not None and restored_run.workspace_path
+        assert restored_run.last_sequence == 0
         assert (Path(restored_run.workspace_path) / "dist" / "index.html").read_bytes() == b"<html><body>real candidate</body></html>"
 
     tested = client.post(f"/api/v1/candidates/{restored_id}/test")

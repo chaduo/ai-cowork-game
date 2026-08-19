@@ -261,7 +261,7 @@ class CheckpointService:
                     id=run_id,
                     build_id=candidate.build_id,
                     status="succeeded",
-                    last_sequence=1,
+                    last_sequence=0,
                     workspace_path=str(paths.root),
                     workspace_status="prepared",
                     ended_at=utc_now(),
