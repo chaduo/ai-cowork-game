@@ -177,11 +177,26 @@ def brainstorm_design(project_id: str, payload: BrainstormInput, request: Reques
         design = session.scalar(select(GameDesign).where(GameDesign.project_id == project.id))
         current = _response(session, project, design).draft
         base = apply_brainstorm_input(current, payload, turn=current.clarification.question_index + (1 if payload.action in {"answer", "free_text"} else 0))
+        readiness = evaluate_first_playable_readiness(base)
+        terminal = readiness.first_playable_ready or readiness.status == "blocked"
+        base = base.model_copy(
+            update={
+                "clarification": base.clarification.model_copy(
+                    update={
+                        "status": "ready" if readiness.first_playable_ready else "clarifying",
+                        "current_question": None if terminal else base.clarification.current_question,
+                    }
+                ),
+                "readiness": readiness,
+            }
+        )
         # Keep reducer-owned user decisions durable even when the provider
         # response is unavailable or invalid, so continue can retry safely.
-        if payload.action in {"answer", "free_text"}:
-            ProjectLifecycleService(session).submit_design(project.id, base.model_dump(mode="json", exclude_none=True))
+        if payload.action in {"answer", "free_text"} or terminal:
+            saved = ProjectLifecycleService(session).submit_design(project.id, base.model_dump(mode="json", exclude_none=True))
             session.commit()
+            if terminal:
+                return _response(session, project, saved)
         try:
             planned = planner.plan_turn(project.id, base, payload)
         except GameDesignProviderNotConfigured as cause:
@@ -190,8 +205,7 @@ def brainstorm_design(project_id: str, payload: BrainstormInput, request: Reques
             raise ApiError("game_design_provider_failed", str(cause), [], 502) from cause
         # Provider text can propose the next question and summary, but it cannot
         # erase the reducer's user-confirmed decisions or decide readiness.
-        readiness = evaluate_first_playable_readiness(base)
-        next_question = None if readiness.first_playable_ready else planned.next_question
+        next_question = planned.next_question
         merged_clarification = planned.draft.clarification.model_copy(
             update={
                 "status": "ready" if readiness.first_playable_ready else "clarifying",

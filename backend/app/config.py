@@ -13,7 +13,7 @@ class Settings:
     candidate_test_provider: str = "fake"
     game_design_provider: str = "fake"
     game_design_model: str = "kimi-k3"
-    game_design_timeout_seconds: float = 45.0
+    game_design_timeout_seconds: float = 90.0
     opengame_cli_js: str | None = None
     opengame_model: str = "kimi-k3"
     opengame_timeout_seconds: float = 300.0
@@ -52,7 +52,7 @@ class Settings:
         design_timeout = game_design_timeout_seconds
         if design_timeout is None and os.getenv("GAME_DESIGN_TIMEOUT_SECONDS"):
             design_timeout = float(os.environ["GAME_DESIGN_TIMEOUT_SECONDS"])
-        object.__setattr__(self, "game_design_timeout_seconds", design_timeout or 45.0)
+        object.__setattr__(self, "game_design_timeout_seconds", design_timeout or 90.0)
         object.__setattr__(self, "opengame_cli_js", opengame_cli_js or os.getenv("OPENGAME_CLI_JS"))
         object.__setattr__(self, "opengame_model", opengame_model or os.getenv("OPENAI_MODEL", "kimi-k3"))
         timeout = opengame_timeout_seconds

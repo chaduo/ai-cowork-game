@@ -29,6 +29,9 @@ TURN_BUDGET: Final[int] = 6
 
 def _category(question_id: str) -> str | None:
     value = question_id.lower().replace("-", "_")
+    for category in GAP_ORDER:
+        if category in value:
+            return category
     aliases = {
         "core_experience": ("core", "experience", "主体验", "核心"),
         "scope": ("scope", "v1", "size", "范围", "第一版", "最小", "配置", "规模"),
@@ -49,7 +52,7 @@ def _confirmed_categories(draft: CreatorGameDesignDraft) -> set[str]:
     for decision in draft.decisions:
         if decision.provenance not in {None, "user_confirmed"}:
             continue
-        category = _category(f"{decision.question_id} {decision.question}")
+        category = _category(decision.question_id) or _category(decision.question)
         if category:
             categories.add(category)
     # The Original Idea is itself user input. When it explicitly states the

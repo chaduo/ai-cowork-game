@@ -6,6 +6,8 @@ from app.config import Settings
 from app.main import create_app
 from app.agents.openai_game_design_planner import OpenAICompatibleGameDesignPlanner
 from app.agents.game_design_planner import GameDesignProviderError
+from app.contracts.design import BrainstormQuestion
+from app.contracts.design_brainstorm import BrainstormTurn
 
 
 def _client(database_url: str, *, planner=None) -> TestClient:
@@ -199,3 +201,131 @@ def test_brainstorm_failure_commits_user_decision_for_continue_retry(isolated_da
     retried = client.post(f"/api/v1/projects/{project['id']}/design/brainstorm", json={"action": "continue"})
     assert retried.status_code == 200
     assert retried.json()["draft"]["decisions"][0]["answer"] == "探索和发现"
+
+
+def test_brainstorm_planner_receives_readiness_recomputed_after_answer(isolated_database) -> None:
+    class Planner:
+        def plan_turn(self, project_id, draft, user_input):
+            question_id = (
+                "q5_completion"
+                if draft.readiness.unresolved_decisions == ["completion"]
+                else "q5_enemy_behavior"
+            )
+            question = BrainstormQuestion(id=question_id, prompt="这一局怎样结束？", choices=[])
+            planned = draft.model_copy(
+                update={"clarification": draft.clarification.model_copy(update={"current_question": question})}
+            )
+            return BrainstormTurn(draft=planned, next_question=question)
+
+    client = _client(str(isolated_database.url), planner=Planner())
+    project = _project(client, key="fresh-readiness", idea="一个小型竞技场战斗游戏")
+    draft = client.get(f"/api/v1/projects/{project['id']}/design").json()["draft"]
+    draft["decisions"] = [
+        {
+            "question_id": "q1_core_experience",
+            "question": "核心体验是什么？",
+            "answer_id": "combat",
+            "answer": "竞技场战斗",
+            "provenance": "user_confirmed",
+        },
+        {
+            "question_id": "q2_player_action",
+            "question": "玩家做什么？",
+            "answer_id": "shoot",
+            "answer": "移动并射击",
+            "provenance": "user_confirmed",
+        },
+        {
+            "question_id": "q3_goal",
+            "question": "玩家的目标是什么？",
+            "answer_id": "survive",
+            "answer": "坚持一段时间",
+            "provenance": "user_confirmed",
+        },
+    ]
+    draft["clarification"] = {
+        "question_index": 3,
+        "status": "clarifying",
+        "custom_input": "",
+        "current_question": {"id": "q4_scope", "prompt": "第一版范围多大？", "choices": []},
+    }
+    draft["readiness"] = {
+        "status": "not_ready",
+        "blockers": [],
+        "unresolved_decisions": ["core_experience", "player_action", "goal", "scope", "completion"],
+    }
+    assert client.put(f"/api/v1/projects/{project['id']}/design", json=draft).status_code == 200
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/design/brainstorm",
+        json={"action": "answer", "question_id": "q4_scope", "answer_id": "small", "answer": "单屏竞技场"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["next_question"]["id"] == "q5_completion"
+
+
+def test_brainstorm_budget_exhaustion_stops_without_another_provider_call(isolated_database) -> None:
+    class Planner:
+        def __init__(self):
+            self.calls = 0
+
+        def plan_turn(self, project_id, draft, user_input):
+            self.calls += 1
+            question = BrainstormQuestion(id="q6_enemy_behavior", prompt="敌人还要怎样行动？", choices=[])
+            planned = draft.model_copy(
+                update={"clarification": draft.clarification.model_copy(update={"current_question": question})}
+            )
+            return BrainstormTurn(draft=planned, next_question=question)
+
+    planner = Planner()
+    client = _client(str(isolated_database.url), planner=planner)
+    project = _project(client, key="budget-stop", idea="一个小型竞技场战斗游戏")
+    draft = client.get(f"/api/v1/projects/{project['id']}/design").json()["draft"]
+    draft["decisions"] = [
+        {
+            "question_id": "q1_core_experience",
+            "question": "核心体验是什么？",
+            "answer_id": "combat",
+            "answer": "竞技场战斗",
+            "provenance": "user_confirmed",
+        },
+        {
+            "question_id": "q2_player_action",
+            "question": "玩家做什么？",
+            "answer_id": "shoot",
+            "answer": "移动并射击",
+            "provenance": "user_confirmed",
+        },
+        {
+            "question_id": "q3_goal",
+            "question": "玩家的目标是什么？",
+            "answer_id": "survive",
+            "answer": "坚持一段时间",
+            "provenance": "user_confirmed",
+        },
+        {
+            "question_id": "q4_scope",
+            "question": "第一版范围多大？",
+            "answer_id": "small",
+            "answer": "单屏竞技场",
+            "provenance": "user_confirmed",
+        },
+    ]
+    draft["clarification"] = {
+        "question_index": 5,
+        "status": "clarifying",
+        "custom_input": "",
+        "current_question": {"id": "q5_enemy_behavior", "prompt": "敌人怎样行动？", "choices": []},
+    }
+    assert client.put(f"/api/v1/projects/{project['id']}/design", json=draft).status_code == 200
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/design/brainstorm",
+        json={"action": "answer", "question_id": "q5_enemy_behavior", "answer_id": "charge", "answer": "近距离冲锋"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["readiness"]["status"] == "blocked"
+    assert response.json()["next_question"] is None
+    assert planner.calls == 0

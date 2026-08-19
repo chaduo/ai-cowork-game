@@ -6,7 +6,7 @@ import pytest
 
 from app.agents.game_design_planner import GameDesignProviderError, GameDesignProviderNotConfigured
 from app.agents.openai_game_design_planner import OpenAICompatibleGameDesignPlanner
-from app.contracts.design import CreatorGameDesignDraft
+from app.contracts.design import CreatorGameDesignDraft, DesignReadiness
 from app.contracts.design_brainstorm import BrainstormInput
 
 
@@ -176,6 +176,47 @@ def test_provider_prompt_requests_incremental_brainstorm_payload() -> None:
     assert '"next_question":{"id":"...","prompt":"..."' in system_prompt
 
 
+def test_provider_input_names_the_next_blocking_decision() -> None:
+    captured: dict = {}
+
+    def opener(request, timeout):
+        captured.update(json.loads(request.data.decode()))
+        return _Response(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"next_question":{"id":"q5_completion","prompt":"这一局怎样结束？","choices":[]}}'
+                        }
+                    }
+                ]
+            }
+        )
+
+    planner = OpenAICompatibleGameDesignPlanner(
+        base_url="https://example.test/v1",
+        api_key="secret",
+        model="test-model",
+        opener=opener,
+    )
+    draft = _draft().model_copy(
+        update={
+            "readiness": DesignReadiness(
+                status="not_ready",
+                blockers=[],
+                unresolved_decisions=["completion"],
+                first_playable_ready=False,
+                full_gdd_ready=False,
+            )
+        }
+    )
+
+    planner.plan_turn("project", draft, BrainstormInput(action="continue"))
+
+    provider_input = json.loads(captured["messages"][1]["content"])
+    assert provider_input["next_blocking_decision"] == "completion"
+
+
 def test_kimi_provider_request_uses_only_supported_completion_fields() -> None:
     captured: list[dict] = []
 
@@ -274,6 +315,40 @@ def test_provider_accepts_nested_output_content_segments() -> None:
     turn = planner.plan_turn("project", _draft(), BrainstormInput(action="continue"))
 
     assert len(calls) == 1
+    assert turn.next_question is not None
+    assert turn.next_question.id == "q2"
+
+
+def test_provider_retries_one_transient_timeout() -> None:
+    calls = 0
+
+    def opener(request, timeout):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise TimeoutError("provider response was slow")
+        return _Response(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"next_question":{"id":"q2","prompt":"玩家下一步做什么？","choices":[]}}'
+                        }
+                    }
+                ]
+            }
+        )
+
+    planner = OpenAICompatibleGameDesignPlanner(
+        base_url="https://example.test/v1",
+        api_key="secret",
+        model="test-model",
+        opener=opener,
+    )
+
+    turn = planner.plan_turn("project", _draft(), BrainstormInput(action="continue"))
+
+    assert calls == 2
     assert turn.next_question is not None
     assert turn.next_question.id == "q2"
 

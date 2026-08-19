@@ -190,7 +190,7 @@ class OpenAICompatibleGameDesignPlanner:
         base_url: str | None,
         api_key: str | None,
         model: str,
-        timeout_seconds: float = 45.0,
+        timeout_seconds: float = 90.0,
         opener: Callable[..., Any] = urlopen,
     ) -> None:
         self.base_url = base_url.rstrip("/") if base_url else None
@@ -200,28 +200,32 @@ class OpenAICompatibleGameDesignPlanner:
         self._opener = opener
 
     def _request_json(self, payload: dict[str, Any]) -> dict[str, Any]:
-        request = Request(
-            f"{self.base_url}/chat/completions",
-            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with self._opener(request, timeout=self.timeout_seconds) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except HTTPError as error:
-            detail = ""
+        for attempt in range(2):
+            request = Request(
+                f"{self.base_url}/chat/completions",
+                data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+                method="POST",
+            )
             try:
-                raw = error.read().decode("utf-8", errors="replace")
-                parsed = json.loads(raw)
-                detail = str(parsed.get("error", {}).get("message", ""))
-            except (AttributeError, OSError, TypeError, ValueError):
+                with self._opener(request, timeout=self.timeout_seconds) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except HTTPError as error:
                 detail = ""
-            detail = re.sub(r"sk-[A-Za-z0-9_-]+", "[redacted]", detail)[:400]
-            suffix = f": {detail}" if detail else ""
-            raise GameDesignProviderError(f"Game Design provider returned HTTP {error.code}{suffix}") from error
-        except (URLError, TimeoutError, OSError, json.JSONDecodeError) as error:
-            raise GameDesignProviderError("Game Design provider request failed") from error
+                try:
+                    raw = error.read().decode("utf-8", errors="replace")
+                    parsed = json.loads(raw)
+                    detail = str(parsed.get("error", {}).get("message", ""))
+                except (AttributeError, OSError, TypeError, ValueError):
+                    detail = ""
+                detail = re.sub(r"sk-[A-Za-z0-9_-]+", "[redacted]", detail)[:400]
+                suffix = f": {detail}" if detail else ""
+                raise GameDesignProviderError(f"Game Design provider returned HTTP {error.code}{suffix}") from error
+            except (URLError, TimeoutError, OSError, json.JSONDecodeError) as error:
+                if attempt == 0:
+                    continue
+                raise GameDesignProviderError("Game Design provider request failed after retry") from error
+        raise RuntimeError("unreachable")
 
     @staticmethod
     def _repair_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -233,6 +237,7 @@ class OpenAICompatibleGameDesignPlanner:
                 "content": (
                     "上一次输出无法解析。现在只输出一个合法 JSON 对象，不能有 Markdown、解释文字或思考过程。"
                     "必须包含 next_question 对象；除非输入中的 readiness.first_playable_ready=true，否则 next_question 不得为 null。"
+                    "next_question 必须只询问输入中 next_blocking_decision 指定的决策，id 必须包含该英文分类。"
                     "draft 可省略。"
                 ),
             },
@@ -267,13 +272,23 @@ class OpenAICompatibleGameDesignPlanner:
                         "只做 First Playable 必需决定，不要替用户确认，不要返回 workflow 状态。"
                         "请返回增量结果：draft 可省略或只包含 summary、project_title、scenario_id；"
                         "不要输出 decisions/readiness/original_idea。必须包含 next_question（完成 First Playable 时可为 null）。"
+                        "next_question 必须只询问输入中 next_blocking_decision 指定的决策，id 必须包含该英文分类。"
                         'JSON 形如 {"next_question":{"id":"...","prompt":"...","choices":[]},"draft":{}}。'
                     ),
                 },
                 {
                     "role": "user",
                     "content": json.dumps(
-                        {"project_id": project_id, "draft": draft.model_dump(mode="json"), "input": user_input.model_dump(mode="json")},
+                        {
+                            "project_id": project_id,
+                            "draft": draft.model_dump(mode="json"),
+                            "input": user_input.model_dump(mode="json"),
+                            "next_blocking_decision": (
+                                draft.readiness.unresolved_decisions[0]
+                                if draft.readiness.unresolved_decisions
+                                else None
+                            ),
+                        },
                         ensure_ascii=False,
                     ),
                 },

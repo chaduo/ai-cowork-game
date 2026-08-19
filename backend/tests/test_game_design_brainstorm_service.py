@@ -101,6 +101,68 @@ def test_provider_question_ids_use_question_text_for_readiness_categories() -> N
     assert "scope" not in readiness.unresolved_decisions
 
 
+def test_explicit_question_category_wins_over_noisy_question_text() -> None:
+    draft = _draft().model_copy(
+        update={
+            "decisions": [
+                DesignDecision(
+                    question_id="q1_core_experience",
+                    question="玩家的核心体验是什么？",
+                    answer_id="combat",
+                    answer="竞技场战斗",
+                    provenance="user_confirmed",
+                ),
+                DesignDecision(
+                    question_id="q2_player_action",
+                    question="玩家如何移动和攻击？",
+                    answer_id="shoot",
+                    answer="移动并射击",
+                    provenance="user_confirmed",
+                ),
+                DesignDecision(
+                    question_id="q3_goal",
+                    question="核心玩法确定后，玩家坚持到什么目标才算胜利？",
+                    answer_id="survive",
+                    answer="撑过倒计时",
+                    provenance="user_confirmed",
+                ),
+                DesignDecision(
+                    question_id="q4_scope",
+                    question="玩家如何操作攻击，这会决定最小实现范围。",
+                    answer_id="ranged",
+                    answer="远程射击",
+                    provenance="user_confirmed",
+                ),
+            ]
+        }
+    )
+
+    readiness = evaluate_first_playable_readiness(draft)
+
+    assert readiness.unresolved_decisions == ["completion"]
+
+
+def test_full_category_name_wins_over_overlapping_alias_in_question_id() -> None:
+    draft = _draft().model_copy(
+        update={
+            "decisions": [
+                DesignDecision(
+                    question_id="player_action_core",
+                    question="核心操作具体怎么完成？",
+                    answer_id="press",
+                    answer="靠近工作台按键操作",
+                    provenance="user_confirmed",
+                )
+            ]
+        }
+    )
+
+    readiness = evaluate_first_playable_readiness(draft)
+
+    assert "player_action" not in readiness.unresolved_decisions
+    assert "core_experience" in readiness.unresolved_decisions
+
+
 def test_explicit_goal_in_original_idea_counts_as_user_goal() -> None:
     draft = _draft().model_copy(
         update={
